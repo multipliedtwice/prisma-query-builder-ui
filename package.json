@@ -139,6 +139,7 @@
     "@prisma/internals": "^7.3.0",
     "codemirror": "^6.0.2",
     "nanoid": "^5.1.6",
+    "prettier": "^3.8.1",
     "prisma-sql": "1.62.0",
     "svelte-tiny-virtual-list": "^3.0.1"
   },

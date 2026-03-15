@@ -3154,6 +3154,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"prettier@npm:^3.8.1":
+  version: 3.8.1
+  resolution: "prettier@npm:3.8.1"
+  bin:
+    prettier: bin/prettier.cjs
+  checksum: 36fe4ecd95751aa17fea70b48afd5086e88002988238112fc1be30a5307af6983e1833be790b0cc1c54702b71f73b12bfec12c05166d7619e3151ab221654297
+  languageName: node
+  linkType: hard
+
 "prisma-query-builder-ui@workspace:.":
   version: 0.0.0-use.local
   resolution: "prisma-query-builder-ui@workspace:."
@@ -3185,6 +3194,7 @@ __metadata:
     codemirror: ^6.0.2
     nanoid: ^5.1.6
     paneforge: ^1.0.2
+    prettier: ^3.8.1
     prisma: ^7.3.0
     prisma-sql: 1.62.0
     publint: ^0.3.17
