@@ -24,14 +24,14 @@ function detectPrismaMajorVersion(): number {
   return 6;
 }
 
-function buildV6Schema(baseSchema: string, dbUrl: string): string {
+function buildSchemaWithUrl(baseSchema: string, dbUrl: string): string {
   return baseSchema.replace(
     /datasource\s+db\s*\{([^}]*)\}/,
     `datasource db {\n  provider = "sqlite"\n  url      = "${dbUrl}"\n}`
   );
 }
 
-function buildV7ConfigFile(dbUrl: string, schemaFilePath: string): string {
+function buildConfigFile(dbUrl: string, schemaFilePath: string): string {
   return `
 import { defineConfig } from "prisma/config";
 export default defineConfig({
@@ -92,28 +92,26 @@ export async function ensureQueriesDb(): Promise<void> {
   try {
     const isWin = process.platform === "win32";
     const npxCmd = isWin ? "npx.cmd" : "npx";
+
+    const tempSchemaPath = join(tempDir, "schema.prisma");
+    const schemaWithUrl = buildSchemaWithUrl(baseSchema, dbUrl);
+    writeFileSync(tempSchemaPath, schemaWithUrl, "utf-8");
+
+    const tempConfigPath = join(tempDir, "prisma.config.mjs");
+    writeFileSync(tempConfigPath, buildConfigFile(dbUrl, tempSchemaPath), "utf-8");
+
     let args: string[];
 
     if (majorVersion >= 7) {
-      const tempSchemaPath = join(tempDir, "schema.prisma");
-      const tempConfigPath = join(tempDir, "prisma.config.mjs");
-
-      writeFileSync(tempSchemaPath, baseSchema, "utf-8");
-      writeFileSync(tempConfigPath, buildV7ConfigFile(dbUrl, tempSchemaPath), "utf-8");
-
       args = [
         "prisma", "db", "push",
         "--config", tempConfigPath,
-        "--skip-generate",
         "--accept-data-loss",
       ];
     } else {
-      const tempSchemaPath = join(tempDir, "schema.prisma");
-      writeFileSync(tempSchemaPath, buildV6Schema(baseSchema, dbUrl), "utf-8");
-
       args = [
         "prisma", "db", "push",
-        "--schema", tempSchemaPath,
+        "--config", tempConfigPath,
         "--skip-generate",
         "--accept-data-loss",
       ];
@@ -121,7 +119,7 @@ export async function ensureQueriesDb(): Promise<void> {
 
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(npxCmd, args, {
-        cwd: process.cwd(),
+        cwd: tempDir,
         stdio: "pipe",
         env: {
           ...process.env,
