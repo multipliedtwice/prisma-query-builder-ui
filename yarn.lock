@@ -3207,6 +3207,7 @@ __metadata:
       optional: true
   bin:
     prisma-query-builder: ./bin/cli.js
+    prisma-query-builder-ui: ./bin/cli.js
   languageName: unknown
   linkType: soft
 
