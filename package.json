@@ -1,0 +1,148 @@
+{
+  "name": "prisma-query-builder-ui",
+  "version": "0.1.0",
+  "description": "Visual query builder for Prisma Client - interface for building and testing Prisma queries",
+  "bin": {
+    "prisma-query-builder": "./bin/cli.js",
+    "prisma-query-builder-ui": "./bin/cli.js"
+  },
+  "keywords": [
+    "prisma",
+    "query-builder",
+    "svelte",
+    "developer-tools",
+    "database",
+    "orm",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "multipliedtwice",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/multipliedtwice/prisma-query-builder-ui"
+  },
+  "bugs": {
+    "url": "https://github.com/multipliedtwice/prisma-query-builder-ui/issues"
+  },
+  "homepage": "https://github.com/multipliedtwice/prisma-query-builder-ui#readme",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "npm run prisma:generate:q && vite build && npm run package",
+    "package": "svelte-kit sync && svelte-package",
+    "preview": "vite preview",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "prepublishOnly": "npm run build",
+    "prisma:generate:q": "npx prisma generate --config=prisma-queries.config.ts",
+    "prisma:migrate:q": "npx prisma migrate dev --config=prisma-queries.config.ts"
+  },
+  "files": [
+    "dist",
+    "build",
+    "bin",
+    "prisma/queries-schema.prisma",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!build/**/*.map",
+    "!build/**/*.br",
+    "!build/**/*.gz"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js"
+    },
+    "./QueryBuilder.svelte": {
+      "types": "./dist/components/QueryBuilder.svelte.d.ts",
+      "svelte": "./dist/components/QueryBuilder.svelte"
+    },
+    "./parser": {
+      "types": "./dist/lib/dmmf-parser.d.ts",
+      "import": "./dist/lib/dmmf-parser.js"
+    },
+    "./types": {
+      "types": "./dist/lib/types.d.ts",
+      "import": "./dist/lib/types.js"
+    },
+    "./code-generator": {
+      "types": "./dist/lib/code-generator.d.ts",
+      "import": "./dist/lib/code-generator.js"
+    },
+    "./validate-query": {
+      "types": "./dist/lib/validate-query.d.ts",
+      "import": "./dist/lib/validate-query.js"
+    },
+    "./create-server": {
+      "types": "./dist/lib/create-server.d.ts",
+      "import": "./dist/lib/create-server.js"
+    },
+    "./query-builder": {
+      "types": "./dist/lib/query-builder.svelte.d.ts",
+      "svelte": "./dist/lib/query-builder.svelte.js"
+    }
+  },
+  "peerDependencies": {
+    "@prisma/client": ">=5.0.0",
+    "svelte": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "svelte": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@internationalized/date": "^3.10.0",
+    "@lucide/svelte": "^0.562.0",
+    "@sveltejs/adapter-auto": "^7.0.0",
+    "@sveltejs/adapter-node": "^5.5.2",
+    "@sveltejs/kit": "^2.50.1",
+    "@sveltejs/package": "^2.5.7",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.10",
+    "@types/prismjs": "^1.26.5",
+    "bits-ui": "^2.15.4",
+    "clsx": "^2.1.1",
+    "paneforge": "^1.0.2",
+    "prisma": "^7.3.0",
+    "publint": "^0.3.17",
+    "runed": "^0.37.1",
+    "svelte": "^5.48.2",
+    "svelte-check": "^4.3.5",
+    "svelte-toolbelt": "^0.10.6",
+    "tailwind-merge": "^3.4.0",
+    "tailwind-variants": "^3.2.2",
+    "tailwindcss": "^4.1.18",
+    "tw-animate-css": "latest",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.39.11",
+    "@lezer/highlight": "^1.2.3",
+    "@prisma/adapter-better-sqlite3": "^7.3.0",
+    "@prisma/adapter-mariadb": "^7.3.0",
+    "@prisma/adapter-pg": "^7.3.0",
+    "@prisma/client": "^7.3.0",
+    "@prisma/generator-helper": "^7.3.0",
+    "@prisma/internals": "^7.3.0",
+    "codemirror": "^6.0.2",
+    "nanoid": "^5.1.6",
+    "prisma-sql": "1.62.0",
+    "svelte-tiny-virtual-list": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
