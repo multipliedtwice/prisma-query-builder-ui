@@ -36,7 +36,7 @@
     id: string;
     name: string;
     createdAt: Date;
-    databaseUrl?: string | null;
+    hasDatabaseUrl?: boolean;
   };
 
   let parser = $state<DMMFParser | undefined>(undefined);
@@ -67,7 +67,6 @@
     dmmf !== undefined || embeddedConfig.isEmbedded,
   );
 
-  // Embedded mode hides workspace management — no indirection needed
   let showWorkspaceUpload = $derived(!embeddedConfig.isEmbedded);
 
   let emptyStateWorkspaceName = $state("");
@@ -110,7 +109,7 @@
         id: String(w.id),
         name: String(w.name),
         createdAt: new Date(w.createdAt),
-        databaseUrl: w.databaseUrl || null,
+        hasDatabaseUrl: Boolean(w.hasDatabaseUrl),
       }));
 
       if (workspaces.length > 0 && !currentWorkspaceId && !hasLocalSchema) {
@@ -206,7 +205,8 @@
         id: workspaceId,
         name: workspaceName,
         createdAt: new Date(),
-        databaseUrl,
+        hasDatabaseUrl:
+          databaseUrl !== null && databaseUrl.trim() !== "",
       },
       ...workspaces,
     ];
@@ -220,10 +220,16 @@
       workspaces = workspaces.filter((w) => w.id !== workspaceId);
       if (currentWorkspaceId === workspaceId) {
         currentWorkspaceId = null;
-        parser = undefined;
-        operations = [];
         selectedOperation = null;
         queryResult = null;
+        if (hasLocalSchema) {
+          await tryLoadLocalSchemaDmmf();
+        } else if (workspaces.length > 0) {
+          await handleWorkspaceChange(workspaces[0].id);
+        } else {
+          parser = undefined;
+          operations = [];
+        }
       }
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
@@ -238,7 +244,8 @@
       await updateWorkspace(workspaceId, databaseUrl);
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace) {
-        workspace.databaseUrl = databaseUrl;
+        workspace.hasDatabaseUrl =
+          databaseUrl !== null && databaseUrl.trim() !== "";
       }
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
@@ -503,6 +510,7 @@
             {parser}
             {selectedOperation}
             {currentWorkspaceId}
+            isEmbedded={embeddedConfig.isEmbedded}
             {embeddedHasDatabase}
             disablePersistence={embeddedConfig.disablePersistence}
             onrun={handleRun}
@@ -561,6 +569,7 @@
         {parser}
         {selectedOperation}
         {currentWorkspaceId}
+        isEmbedded={embeddedConfig.isEmbedded}
         {embeddedHasDatabase}
         disablePersistence={embeddedConfig.disablePersistence}
         onrun={handleRun}

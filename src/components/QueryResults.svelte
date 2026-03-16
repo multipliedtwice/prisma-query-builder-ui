@@ -2,7 +2,7 @@
   import { Card } from "$lib/components/ui/card/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import Button from "$lib/components/ui/button/button.svelte";
-  import { X, Table as TableIcon, Code, Zap } from "@lucide/svelte";
+  import { X, Table as TableIcon, Code, Zap, TriangleAlert } from "@lucide/svelte";
   import VirtualList from "svelte-tiny-virtual-list";
 
   let {
@@ -16,6 +16,7 @@
       error?: string;
       executionTime?: number;
       usedPrismaSql?: boolean;
+      warnings?: string[];
     } | null;
     isExecuting: boolean;
     onclose: () => void;
@@ -34,8 +35,14 @@
 
   let tableColumns = $derived.by(() => {
     if (!isArrayOfObjects || !result?.data) return [];
-    const firstRow = result.data[0];
-    return Object.keys(firstRow);
+    const keys = new Set<string>();
+    const sample = result.data.slice(0, 100);
+    for (const row of sample) {
+      for (const key of Object.keys(row)) {
+        keys.add(key);
+      }
+    }
+    return [...keys];
   });
 
   let tableData = $derived.by(() => {
@@ -79,6 +86,10 @@
         : "text-muted-foreground",
   );
 
+  let hasWarnings = $derived(
+    result?.warnings && result.warnings.length > 0
+  );
+
   $effect(() => {
     if (containerRef) {
       const resizeObserver = new ResizeObserver((entries) => {
@@ -100,7 +111,9 @@
 </script>
 
 <div class="@container flex flex-col bg-background h-full">
-  <div class="h-[60px] shrink-0 flex flex-row items-center justify-between gap-3 px-4 border-b border-border">
+  <div
+    class="h-[60px] shrink-0 flex flex-row items-center justify-between gap-3 px-4 border-b border-border"
+  >
     <div class="flex items-center gap-2">
       <h3 class="text-sm font-semibold">Query Results</h3>
       {#if result?.executionTime !== undefined}
@@ -145,7 +158,13 @@
       </div>
     {:else if result}
       {#if result.error}
-        <div class="p-4 h-full overflow-auto">
+        <div class="p-4 h-full overflow-auto space-y-3">
+          {#if hasWarnings}
+            <div class="flex items-start gap-2 p-3 rounded-md border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20">
+              <TriangleAlert class="h-4 w-4 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+              <div class="text-xs text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap">{result.warnings?.join("\n")}</div>
+            </div>
+          {/if}
           <Card class="p-4 border-destructive">
             <div class="flex flex-col items-start gap-2">
               <span class="text-destructive font-semibold">Error:</span>
@@ -156,9 +175,11 @@
         </div>
       {:else}
         <div class="h-full flex flex-col">
-          <div class="h-[51px] shrink-0 px-4 flex items-center">
+          <div class="shrink-0 px-4 flex flex-col gap-2 pt-3 pb-2">
             <div class="flex items-center gap-2">
-              <span class={`text-sm font-semibold ${statusColor}`}>Success</span>
+              <span class={`text-sm font-semibold ${statusColor}`}
+                >Success</span
+              >
               {#if Array.isArray(result.data)}
                 <span class="text-xs text-muted-foreground">
                   ({result.data.length}
@@ -166,12 +187,20 @@
                 </span>
               {/if}
               {#if result.usedPrismaSql}
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium"
+                >
                   <Zap class="h-3 w-3" />
                   prisma-sql
                 </span>
               {/if}
             </div>
+            {#if hasWarnings}
+              <div class="flex items-start gap-2 p-2 rounded-md border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20">
+                <TriangleAlert class="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                <div class="text-xs text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap">{result.warnings?.join("\n")}</div>
+              </div>
+            {/if}
           </div>
 
           <Separator />

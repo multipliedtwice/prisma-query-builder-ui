@@ -29,6 +29,7 @@
     parser,
     selectedOperation,
     currentWorkspaceId,
+    isEmbedded = false,
     embeddedHasDatabase = false,
     disablePersistence = false,
     onrun,
@@ -37,6 +38,7 @@
     parser: DMMFParser;
     selectedOperation: Operation | null;
     currentWorkspaceId: string | null;
+    isEmbedded?: boolean;
     embeddedHasDatabase?: boolean;
     disablePersistence?: boolean;
     onrun: (queryState: any, usePrismaSql?: boolean) => void;
@@ -54,6 +56,9 @@
   let isLoadingQueries = $state(false);
   let isDark = $state(false);
   let usePrismaSql = $state(false);
+  let prismaSqlInitialized = $state(false);
+  let loadGeneration = 0;
+  let appliedOperationKeys = $state(new Map<string, string>());
 
   let activeTab = $derived(tabs.find((t) => t.id === activeTabId));
   let activeBuilder = $derived(activeTab?.builder);
@@ -81,8 +86,6 @@
           t.workspaceId === currentWorkspaceId,
       ),
   );
-
-  let lastAppliedOperationKey = $state<string | null>(null);
 
   function payloadHash(payload: Payload): string {
     return JSON.stringify(payload);
@@ -150,6 +153,7 @@
 
     const index = tabs.findIndex((t) => t.id === tabId);
     tabs = tabs.filter((t) => t.id !== tabId);
+    appliedOperationKeys.delete(tabId);
 
     if (activeTabId === tabId) {
       const newIndex = Math.min(index, tabs.length - 1);
@@ -184,7 +188,7 @@
     editingTabName = "";
   }
 
-  function handleArgAdd(argName: string, initialValue?: PayloadValue) {
+  function handleArgAdd(argName: string | string[], initialValue?: PayloadValue) {
     if (activeBuilder) {
       activeBuilder.addArg(argName, initialValue ?? {});
       if (activeTab) markDirty(activeTab);
@@ -208,7 +212,21 @@
     }
   }
 
-  function handlePayloadChange(payload: Payload) {
+  function handleAddArrayItem(arrayPath: string[]) {
+    if (activeBuilder) {
+      activeBuilder.addArrayItem(arrayPath);
+      if (activeTab) markDirty(activeTab);
+    }
+  }
+
+  function handleRemoveArrayItem(arrayPath: string[], index: number) {
+    if (activeBuilder) {
+      activeBuilder.removeArrayItem(arrayPath, index);
+      if (activeTab) markDirty(activeTab);
+    }
+  }
+
+  function handleEditPayload(payload: Payload) {
     if (activeBuilder) {
       activeBuilder.replacePayload(payload);
       if (activeTab) markDirty(activeTab);
@@ -259,9 +277,14 @@
     }
   }
 
-  function operationFromSaved(model: string, method: string): Operation | null {
+  function operationFromSaved(
+    model: string,
+    method: string,
+  ): Operation | null {
     const ops = parser.getOperations();
-    return ops.find((op) => op.model === model && op.method === method) ?? null;
+    return (
+      ops.find((op) => op.model === model && op.method === method) ?? null
+    );
   }
 
   function safeJsonParsePayload(payload: string): Payload {
@@ -274,15 +297,19 @@
     }
   }
 
-  async function reloadTabsFromDb() {
+  async function reloadTabsFromDb(token: number) {
     if (disablePersistence) {
+      if (token !== loadGeneration) return;
       initEmptyTabs();
+      appliedOperationKeys = new Map();
       return;
     }
 
     isLoadingQueries = true;
     try {
       const saved = await loadQueries(currentWorkspaceId);
+
+      if (token !== loadGeneration) return;
 
       const loadedTabs: QueryTab[] = [];
       let idCounter = 1;
@@ -313,6 +340,10 @@
         idCounter++;
       }
 
+      if (token !== loadGeneration) return;
+
+      appliedOperationKeys = new Map();
+
       if (loadedTabs.length === 0) {
         const emptyTab: QueryTab = {
           id: String(idCounter),
@@ -334,9 +365,13 @@
         nextTabId = idCounter;
       }
     } catch {
+      if (token !== loadGeneration) return;
       initEmptyTabs();
+      appliedOperationKeys = new Map();
     } finally {
-      isLoadingQueries = false;
+      if (token === loadGeneration) {
+        isLoadingQueries = false;
+      }
     }
   }
 
@@ -360,16 +395,25 @@
 
   $effect(() => {
     if (!parser) return;
-    reloadTabsFromDb();
+    const gen = ++loadGeneration;
+    reloadTabsFromDb(gen);
   });
 
   $effect(() => {
-    if (!selectedOperation || !activeBuilder) return;
+    if (prismaSqlInitialized) {
+      try {
+        localStorage.setItem("usePrismaSql", String(usePrismaSql));
+      } catch {}
+    }
+  });
+
+  $effect(() => {
+    if (!selectedOperation || !activeBuilder || !activeTab) return;
 
     const newKey = `${selectedOperation.model}.${selectedOperation.method}`;
-    if (lastAppliedOperationKey === newKey) return;
+    if (appliedOperationKeys.get(activeTab.id) === newKey) return;
 
-    lastAppliedOperationKey = newKey;
+    appliedOperationKeys.set(activeTab.id, newKey);
 
     const currentOp = activeBuilder.state.operation;
     const hasPayload = Object.keys(activeBuilder.state.payload).length > 0;
@@ -412,6 +456,8 @@
       }
     } catch {}
 
+    prismaSqlInitialized = true;
+
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       const dirty = tabs.some((t) => t.isDirty);
       if (dirty) {
@@ -432,8 +478,8 @@
     >
       <TriangleAlert class="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
       <span class="text-yellow-800 dark:text-yellow-200">
-        {incompatibleTabs.length} tab{incompatibleTabs.length > 1 ? "s" : ""} from
-        different workspace{incompatibleTabs.length > 1 ? "s" : ""}
+        {incompatibleTabs.length} tab{incompatibleTabs.length > 1 ? "s" : ""}
+        from different workspace{incompatibleTabs.length > 1 ? "s" : ""}
       </span>
     </div>
   {/if}
@@ -563,6 +609,8 @@
                 onaddarg={handleArgAdd}
                 ontogglefield={handleFieldToggle}
                 onbreadcrumbclick={handleBreadcrumbClick}
+                onaddarrayitem={handleAddArrayItem}
+                onremovearrayitem={handleRemoveArrayItem}
               />
             {:else}
               <div class="flex h-full items-center justify-center p-8">
@@ -579,9 +627,10 @@
             <CodePreview
               queryState={tab.builder.state}
               onrun={handleRun}
-              onpayloadchange={handlePayloadChange}
+              oneditpayload={handleEditPayload}
               bind:usePrismaSql
               hasWorkspace={currentWorkspaceId !== null}
+              {isEmbedded}
               {embeddedHasDatabase}
             />
           </Resizable.Pane>
