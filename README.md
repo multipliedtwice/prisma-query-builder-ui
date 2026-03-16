@@ -24,6 +24,7 @@ Visual query builder for Prisma Client - Developer tool for building and testing
 - ⚡ **prisma-sql support** - Optional 2-7x query performance boost (both modes)
 
 ## Installation
+
 ```bash
 npm install -D prisma-query-builder-ui
 # or
@@ -37,6 +38,7 @@ yarn add -D prisma-query-builder-ui
 ### Mode 1: Standalone Application
 
 Run the query builder as a standalone development server:
+
 ```bash
 # Using npx
 npx prisma-query-builder
@@ -60,6 +62,7 @@ Open http://localhost:5173 and:
 5. **Save queries**: Click "Save All" to persist queries per workspace
 
 **Environment variables** (optional):
+
 ```bash
 # Schema location
 PRISMA_QUERY_BUILDER_SCHEMA=/path/to/schema.prisma  # Path to your schema file
@@ -71,6 +74,9 @@ HOST=localhost                                       # Server host (default: loc
 
 # Database connection (optional, for query execution without workspace)
 DATABASE_URL=postgresql://user:password@localhost:5432/mydb
+
+# Debug logging (optional)
+PRISMA_QUERY_BUILDER_DEBUG=true                      # Enable verbose debug logs
 ```
 
 ### Mode 2: Embedded Mode (Integrated with API Server)
@@ -85,6 +91,7 @@ The query builder can run automatically alongside any API server and be embedded
 4. Your app embeds it via iframe or provides a link
 
 **Basic Setup:**
+
 ```typescript
 // start-query-builder.ts
 import { spawn, ChildProcess } from 'child_process'
@@ -147,6 +154,7 @@ export function stopQueryBuilder() {
 ```
 
 **Using in your server:**
+
 ```typescript
 // server.ts
 import { startQueryBuilder } from './start-query-builder'
@@ -167,6 +175,7 @@ console.log('🔧 Query Builder: http://localhost:5173')
 ```
 
 **Embedding in HTML (e.g., API docs):**
+
 ```html
 <!DOCTYPE html>
 <html>
@@ -198,6 +207,7 @@ console.log('🔧 Query Builder: http://localhost:5173')
 - `hideWorkspaceManager=true` - Alternative to `embedded=true`
 
 **Environment Variables (Embedded Mode):**
+
 ```bash
 # Mode flags
 PRISMA_QUERY_BUILDER_MODE=embedded          # Enables embedded mode
@@ -218,6 +228,7 @@ PORT=5173                                    # Query builder port
 
 <details>
 <summary><b>Express.js</b></summary>
+
 ```typescript
 import express from 'express'
 import { startQueryBuilder, stopQueryBuilder } from './start-query-builder'
@@ -265,10 +276,12 @@ process.on('SIGTERM', () => {
   server.close()
 })
 ```
+
 </details>
 
 <details>
 <summary><b>Fastify</b></summary>
+
 ```typescript
 import Fastify from 'fastify'
 import { startQueryBuilder, stopQueryBuilder } from './start-query-builder'
@@ -319,10 +332,12 @@ process.on('SIGTERM', () => {
   fastify.close()
 })
 ```
+
 </details>
 
 <details>
 <summary><b>Hono</b></summary>
+
 ```typescript
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
@@ -370,10 +385,12 @@ process.on('SIGTERM', () => {
   server.close()
 })
 ```
+
 </details>
 
 <details>
-<summary><b>Next.js (API Routes)</b></summary>
+<summary><b>Next.js</b></summary>
+
 ```typescript
 // lib/query-builder.ts
 import { spawn, ChildProcess } from 'child_process'
@@ -398,21 +415,17 @@ export function startQueryBuilder() {
   })
 }
 
-// pages/_app.tsx (or app/layout.tsx)
-import { useEffect } from 'react'
-import { startQueryBuilder } from '../lib/query-builder'
+// instrumentation.ts (Next.js server instrumentation file)
+// This runs server-side only during startup
+import { startQueryBuilder } from './lib/query-builder'
 
-export default function App({ Component, pageProps }) {
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      startQueryBuilder()
-    }
-  }, [])
-  
-  return <Component {...pageProps} />
+export function register() {
+  if (process.env.NODE_ENV === 'development') {
+    startQueryBuilder()
+  }
 }
 
-// pages/docs.tsx
+// pages/docs.tsx (or app/docs/page.tsx)
 export default function DocsPage() {
   return (
     <div style={{ height: '100vh', margin: 0 }}>
@@ -424,6 +437,7 @@ export default function DocsPage() {
   )
 }
 ```
+
 </details>
 
 **Benefits of Embedded Mode:**
@@ -438,6 +452,7 @@ export default function DocsPage() {
 ### Mode 3: Embedded in Your SvelteKit Application
 
 Use the Svelte component directly in your SvelteKit app:
+
 ```svelte
 <script lang="ts">
   import QueryBuilder from 'prisma-query-builder-ui/QueryBuilder.svelte';
@@ -457,6 +472,7 @@ Use the Svelte component directly in your SvelteKit app:
 ```
 
 **Required API endpoints:**
+
 ```typescript
 // src/routes/api/dmmf/+server.ts
 import { json } from '@sveltejs/kit';
@@ -469,6 +485,7 @@ export async function GET() {
   return json(dmmf);
 }
 ```
+
 ```typescript
 // src/routes/api/execute/+server.ts
 import { json } from '@sveltejs/kit';
@@ -515,6 +532,7 @@ Each workspace maintains its own:
 - **SQLite** (via `@prisma/adapter-better-sqlite3`)
 
 ### Database URL Examples
+
 ```bash
 # PostgreSQL
 postgresql://user:password@localhost:5432/mydb
@@ -538,10 +556,10 @@ Workspaces are stored in:
 
 ## Save Queries Feature (Standalone Mode Only)
 
-In standalone mode, all queries are automatically saved per workspace:
+In standalone mode, queries can be saved per workspace:
 
-- **Auto-save**: Queries are marked as dirty (•) when modified
-- **Save All**: Click "Save All" button to persist all modified queries
+- **Dirty tracking**: Queries are marked as dirty (•) when modified
+- **Save All**: Click the "Save All" button to persist all modified queries
 - **Query naming**: Rename queries by clicking the edit icon on tabs
 - **Persistence**: Saved queries reload when switching workspaces
 - **Multi-tab**: Work on multiple queries simultaneously (max 20 tabs)
@@ -566,6 +584,7 @@ Both standalone mode (with workspaces) and embedded mode support `prisma-sql` fo
 The toggle automatically appears when all requirements are met. If unavailable, queries use standard Prisma Client.
 
 ## Development
+
 ```bash
 # Install dependencies
 npm install
@@ -592,7 +611,7 @@ npm run check
 ## Requirements
 
 - **Node.js** >= 18
-- **Prisma** >= 5.0.0
+- **Prisma** >= 7.0.0
 - **Svelte** 5 (when using the component)
 
 ## How It Works
@@ -610,7 +629,7 @@ npm run check
 
 - **Frontend**: Svelte 5 with SvelteKit
 - **Styling**: TailwindCSS 4
-- **Code Editor**: CodeMirror 6
+- **Code Editor**: CodeMirror 6 (read-only preview with copy and format)
 - **Database**: SQLite (for storing workspaces and queries in standalone mode)
 - **Prisma Client**: Generated per workspace in isolated directories (standalone) or in `.prisma-query-builder-temp/` (embedded)
 - **Query Optimization**: Optional prisma-sql integration for faster queries (both modes)
@@ -646,6 +665,7 @@ npm run check
 ## Environment Variables Reference
 
 ### Standalone Mode
+
 ```bash
 # Schema location (optional)
 PRISMA_QUERY_BUILDER_SCHEMA=/path/to/schema.prisma
@@ -664,9 +684,13 @@ CLIENT_IDLE_TIMEOUT=300000         # Idle timeout in ms (default: 5 minutes)
 
 # Query execution (optional)
 QUERY_TIMEOUT=30000                # Query timeout in ms (default: 30 seconds)
+
+# Debug logging (optional)
+PRISMA_QUERY_BUILDER_DEBUG=true    # Enable verbose debug logs
 ```
 
 ### Embedded Mode
+
 ```bash
 # Mode flags (set by parent process)
 PRISMA_QUERY_BUILDER_MODE=embedded
@@ -687,6 +711,7 @@ HOST=localhost
 ### URL Query Parameters
 
 When accessing the query builder via browser:
+
 ```
 http://localhost:5173?embedded=true&hideHeader=true&hideWorkspaceManager=true
 ```
@@ -698,6 +723,7 @@ http://localhost:5173?embedded=true&hideHeader=true&hideWorkspaceManager=true
 ## Troubleshooting
 
 ### Query builder won't start
+
 ```bash
 # Check if port 5173 is already in use
 lsof -i :5173
@@ -709,6 +735,7 @@ PORT=5174 npx prisma-query-builder
 ### Schema not loading in embedded mode
 
 Make sure you're setting the environment variable correctly:
+
 ```typescript
 // ❌ Wrong
 env: {
@@ -743,6 +770,16 @@ prisma-sql is available in both modes but requires:
 - **Toggle enabled**: Turn on the "prisma-sql" switch in the UI
 
 If any requirement is missing, queries automatically fall back to standard Prisma Client.
+
+### Debug logging
+
+Enable verbose debug logs to troubleshoot issues:
+
+```bash
+PRISMA_QUERY_BUILDER_DEBUG=true npx prisma-query-builder
+```
+
+This will output detailed information about schema loading, client creation, query execution, and workspace management.
 
 ## Contributing
 
@@ -787,5 +824,3 @@ MIT
 - Query optimization powered by [prisma-sql](https://github.com/teamdrive/prisma-sql)
 
 ---
-
-Made with ❤️ for the Prisma community

@@ -15,12 +15,10 @@ if (!existsSync(entry)) {
 
 const port = process.env.PORT || 5173;
 
-// Set package root so server can find resources
 process.env.PRISMA_QUERY_BUILDER_PACKAGE_ROOT = packageRoot;
 
-// adapter-node environment
 process.env.PORT = String(port);
-process.env.HOST = process.env.HOST || '0.0.0.0';
+process.env.HOST = process.env.HOST || '127.0.0.1';
 process.env.ORIGIN = process.env.ORIGIN || `http://localhost:${port}`;
 
 console.log(`Prisma Query Builder → http://localhost:${port}`);
