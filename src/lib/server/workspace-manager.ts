@@ -1,6 +1,6 @@
 import prismaInternals from "@prisma/internals";
-import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dirname, resolve, join } from "node:path";
 import { createRequire } from "node:module";
 import { nanoid } from "nanoid";
 import {
@@ -8,28 +8,41 @@ import {
   writeFileSync,
   rmSync,
   existsSync,
-  renameSync,
+  renameSync
 } from "node:fs";
 import { spawn } from "node:child_process";
 import type { DMMFData } from "../types.js";
 import { getQueriesDb } from "./queries-db.js";
+import {
+  extractProviderFromSchema,
+  extractProviderFromUrl,
+  isSupportedProvider,
+  buildSchemaWithGenerators,
+  buildValidationSchema,
+  cleanSchemaForPrisma7,
+  createAdapterForProvider,
+  closeExternalResource
+} from "./database-utils.js";
+import { debug, debugWarn } from "./debug.js";
 
 const { getDMMF, getGenerators } = prismaInternals;
 const require = createRequire(import.meta.url);
 
-// Get package root from env or calculate
-const packageRoot = process.env.PRISMA_QUERY_BUILDER_PACKAGE_ROOT 
-  || resolve(new URL('.', import.meta.url).pathname, "../../..");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-// User data in CWD (persists across npm installs)
+const packageRoot =
+  process.env.PRISMA_QUERY_BUILDER_PACKAGE_ROOT ||
+  resolve(__dirname, "../../..");
+
 const workspacesDir = resolve(process.cwd(), ".workspaces");
 
 const MAX_CACHED_CLIENTS = parseInt(process.env.MAX_CACHED_CLIENTS ?? "50");
 const CLIENT_IDLE_TIMEOUT = parseInt(
-  process.env.CLIENT_IDLE_TIMEOUT ?? "300000",
+  process.env.CLIENT_IDLE_TIMEOUT ?? "300000"
 );
 
-type Workspace = {
+export type Workspace = {
   id: string;
   name: string;
   schemaContent: string;
@@ -43,55 +56,27 @@ type CachedClient = {
   lastUsed: number;
   activeQueries: number;
   disconnecting: boolean;
+  usePrismaSql: boolean;
+  externalResource: any | null;
 };
 
 const clientCache = new Map<string, CachedClient>();
 const clientLocks = new Map<string, Promise<any>>();
+const dmmfCache = new Map<string, DMMFData>();
 
 let cleanupInterval: NodeJS.Timeout | null = null;
+let cleanupStarted = false;
 
-function extractProviderFromSchema(schemaContent: string): string {
-  const match = schemaContent.match(
-    /datasource\s+\w+\s*\{[^}]*provider\s*=\s*"([^"]+)"[^}]*\}/s,
+function cacheKey(workspaceId: string, usePrismaSql: boolean): string {
+  return `${workspaceId}:${usePrismaSql ? "1" : "0"}`;
+}
+
+function getCacheEntriesForWorkspace(
+  workspaceId: string
+): [string, CachedClient][] {
+  return [...clientCache.entries()].filter(([key]) =>
+    key.startsWith(`${workspaceId}:`)
   );
-  if (match) {
-    const provider = match[1].toLowerCase();
-    if (provider === "postgres" || provider === "postgresql")
-      return "postgresql";
-    if (provider === "mysql") return "mysql";
-    if (provider === "sqlite") return "sqlite";
-    if (provider === "sqlserver") return "sqlserver";
-    if (provider === "mongodb") return "mongodb";
-    return provider;
-  }
-  return "postgresql";
-}
-
-function extractProviderFromUrl(url: string): string {
-  const protocol = url.split("://")[0].toLowerCase();
-  if (protocol === "postgres" || protocol === "postgresql") return "postgresql";
-  if (protocol === "mysql") return "mysql";
-  if (protocol === "file" || protocol === "sqlite") return "sqlite";
-  if (protocol === "sqlserver") return "sqlserver";
-  if (protocol === "mongodb") return "mongodb";
-  return protocol;
-}
-
-function parseMysqlUrl(url: string): {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-} {
-  const parsed = new URL(url);
-  return {
-    host: parsed.hostname,
-    port: parsed.port ? parseInt(parsed.port, 10) : 3306,
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database: parsed.pathname.replace(/^\//, ""),
-  };
 }
 
 function getWorkspaceDir(workspaceId: string): string {
@@ -107,42 +92,15 @@ function ensureWorkspacesDir(): void {
   }
 }
 
-function transformSchemaForPrisma7(
-  schemaContent: string,
-  outputPath: string,
-): string {
-  let result = schemaContent;
-
-  const provider = extractProviderFromSchema(schemaContent);
-
-  result = result.replace(/datasource\s+\w+\s*\{[\s\S]*?\}\s*/g, "");
-  result = result.replace(/generator\s+\w+\s*\{[\s\S]*?\}\s*/g, "");
-  result = result.replace(/\n{3,}/g, "\n\n").trim();
-
-  const sqlOutputPath = join(dirname(outputPath), "sql");
-
-  const header = `datasource db {
-  provider = "${provider}"
-}
-
-generator client {
-  provider = "prisma-client"
-  output   = "${outputPath.replace(/\\/g, "/")}"
-}
-
-generator sql {
-  provider = "prisma-sql-generator"
-  output   = "${sqlOutputPath.replace(/\\/g, "/")}"
-}
-
-`;
-
-  return header + result;
+async function closeClientEntry(entry: CachedClient): Promise<void> {
+  entry.disconnecting = true;
+  await entry.client.$disconnect().catch(() => {});
+  await closeExternalResource(entry.externalResource);
 }
 
 async function generateWorkspaceClient(
   workspaceId: string,
-  schemaContent: string,
+  schemaContent: string
 ): Promise<void> {
   const workspaceDir = getWorkspaceDir(workspaceId);
 
@@ -152,12 +110,14 @@ async function generateWorkspaceClient(
     const prismaDir = join(workspaceDir, "prisma");
     const schemaPath = join(prismaDir, "schema.prisma");
     const outputPath = join(workspaceDir, "generated", "client");
+    const sqlOutputPath = join(workspaceDir, "generated", "sql");
 
     mkdirSync(prismaDir, { recursive: true });
 
-    const transformedSchema = transformSchemaForPrisma7(
+    const transformedSchema = buildSchemaWithGenerators(
       schemaContent,
       outputPath,
+      sqlOutputPath
     );
 
     const tempPath = `${schemaPath}.${Date.now()}.tmp`;
@@ -170,12 +130,12 @@ async function generateWorkspaceClient(
       "@prisma",
       "client",
       "generator-build",
-      "index.js",
+      "index.js"
     );
 
     if (!existsSync(generatorPath)) {
       throw new Error(
-        `Generator not found at ${generatorPath}. Make sure @prisma/client is installed.`,
+        `Generator not found at ${generatorPath}. Make sure @prisma/client is installed.`
       );
     }
 
@@ -186,9 +146,9 @@ async function generateWorkspaceClient(
         "prisma-client": {
           type: "rpc",
           generatorPath,
-          isNode: true,
-        },
-      },
+          isNode: true
+        }
+      }
     });
 
     for (const generator of generators) {
@@ -200,59 +160,23 @@ async function generateWorkspaceClient(
       rmSync(workspaceDir, { recursive: true, force: true });
     }
     throw new Error(
-      `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
 
 function clearRequireCache(clientPath: string): void {
-  const resolvedPaths = Object.keys(require.cache).filter(
-    (key) => key.startsWith(clientPath) || key.includes(clientPath),
+  const resolvedPaths = Object.keys(require.cache).filter((key) =>
+    key.startsWith(clientPath)
   );
   for (const path of resolvedPaths) {
     delete require.cache[path];
   }
 }
 
-async function createAdapterForProvider(
-  provider: string,
-  databaseUrl: string,
-): Promise<any> {
-  switch (provider) {
-    case "postgresql": {
-      const { PrismaPg } = await import("@prisma/adapter-pg");
-      return new PrismaPg({
-        connectionString: databaseUrl,
-      });
-    }
-    case "mysql": {
-      const { PrismaMariaDb } = await import("@prisma/adapter-mariadb");
-      const config = parseMysqlUrl(databaseUrl);
-      return new PrismaMariaDb({
-        host: config.host,
-        port: config.port,
-        user: config.user,
-        password: config.password,
-        database: config.database,
-        connectionLimit: 5,
-      });
-    }
-    case "sqlite": {
-      const { PrismaBetterSqlite3 } = await import(
-        "@prisma/adapter-better-sqlite3"
-      );
-      return new PrismaBetterSqlite3({ url: databaseUrl });
-    }
-    default:
-      throw new Error(
-        `Unsupported database provider: ${provider}. Supported: postgresql, mysql, sqlite`,
-      );
-  }
-}
-
 async function syncDatabaseSchema(
   workspaceId: string,
-  databaseUrl: string,
+  databaseUrl: string
 ): Promise<void> {
   const workspaceDir = getWorkspaceDir(workspaceId);
   const isWindows = process.platform === "win32";
@@ -260,7 +184,7 @@ async function syncDatabaseSchema(
   const prismaBin = join(
     packageNodeModules,
     ".bin",
-    isWindows ? "prisma.cmd" : "prisma",
+    isWindows ? "prisma.cmd" : "prisma"
   );
 
   if (!existsSync(prismaBin)) {
@@ -275,9 +199,9 @@ async function syncDatabaseSchema(
       stdio: "pipe",
       env: {
         ...process.env,
-        PRISMA_HIDE_UPDATE_MESSAGE: "true",
+        PRISMA_HIDE_UPDATE_MESSAGE: "true"
       },
-      detached: false,
+      detached: false
     });
 
     let stdout = "";
@@ -302,7 +226,7 @@ async function syncDatabaseSchema(
       if (code === 0) resolve();
       else
         reject(
-          new Error(`Failed to sync database schema: ${stderr || stdout}`),
+          new Error(`Failed to sync database schema: ${stderr || stdout}`)
         );
     });
 
@@ -323,43 +247,30 @@ async function evictLeastRecentlyUsedClient(): Promise<void> {
 
   if (!candidate) return;
 
-  const [lruId, lruEntry] = candidate;
-  lruEntry.disconnecting = true;
-
-  try {
-    await lruEntry.client.$disconnect();
-  } catch {}
-
-  clientCache.delete(lruId);
-}
-
-function cleanSchemaForPrisma7(schemaContent: string): string {
-  let cleaned = schemaContent.replace(
-    /(datasource\s+\w+\s*\{[^}]*?)(?:url|directUrl)\s*=\s*[^\n]+\n/g,
-    "$1",
-  );
-
-  cleaned = cleaned.replace(
-    /generator\s+\w+\s*\{\s*provider\s*=\s*"prisma-client-js"/g,
-    'generator client {\n  provider = "prisma-client"',
-  );
-
-  return cleaned;
+  const [lruKey, lruEntry] = candidate;
+  await closeClientEntry(lruEntry);
+  clientCache.delete(lruKey);
 }
 
 export async function createWorkspace(
   name: string,
   schemaContent: string,
-  databaseUrl: string | null,
+  databaseUrl: string | null
 ): Promise<Workspace> {
   const id = nanoid(12);
   const provider = extractProviderFromSchema(schemaContent);
+
+  if (!isSupportedProvider(provider)) {
+    throw new Error(
+      `Unsupported database provider: ${provider}. Supported: postgresql, mysql, sqlite`
+    );
+  }
 
   if (databaseUrl) {
     const urlProvider = extractProviderFromUrl(databaseUrl);
     if (provider !== urlProvider) {
       throw new Error(
-        `Schema provider (${provider}) doesn't match database URL provider (${urlProvider})`,
+        `Schema provider (${provider}) doesn't match database URL provider (${urlProvider})`
       );
     }
   }
@@ -387,8 +298,8 @@ export async function createWorkspace(
       name,
       schemaContent: cleanedSchema,
       databaseUrl,
-      provider,
-    },
+      provider
+    }
   });
 
   return {
@@ -397,7 +308,7 @@ export async function createWorkspace(
     schemaContent: workspace.schemaContent,
     databaseUrl: workspace.databaseUrl ?? null,
     provider: workspace.provider,
-    createdAt: workspace.createdAt,
+    createdAt: workspace.createdAt
   };
 }
 
@@ -412,64 +323,45 @@ export async function getWorkspaceById(id: string): Promise<Workspace | null> {
     schemaContent: workspace.schemaContent,
     databaseUrl: workspace.databaseUrl ?? null,
     provider: workspace.provider,
-    createdAt: workspace.createdAt,
+    createdAt: workspace.createdAt
   };
 }
 
-export async function getWorkspaceDmmf(workspaceId: string): Promise<DMMFData> {
-  const workspace = await getWorkspaceById(workspaceId);
-  if (!workspace) throw new Error(`Workspace ${workspaceId} not found`);
+export async function getWorkspaceDmmf(
+  workspaceId: string,
+  workspace?: Workspace
+): Promise<DMMFData> {
+  const cached = dmmfCache.get(workspaceId);
+  if (cached) return cached;
 
-  const transformedSchema = transformSchemaForValidation(workspace.schemaContent);
+  const ws = workspace ?? (await getWorkspaceById(workspaceId));
+  if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
+  const transformedSchema = buildValidationSchema(ws.schemaContent);
   const dmmf = await getDMMF({ datamodel: transformedSchema } as any);
 
   const result: DMMFData = {
     datamodel: dmmf.datamodel as unknown as DMMFData["datamodel"],
     schema: dmmf.schema as unknown as DMMFData["schema"],
-    mappings: dmmf.mappings as unknown as DMMFData["mappings"],
+    mappings: dmmf.mappings as unknown as DMMFData["mappings"]
   };
 
+  dmmfCache.set(workspaceId, result);
   return result;
 }
 
-export function transformSchemaForValidation(schemaContent: string): string {
-  let result = schemaContent;
-
-  const providerMatch = schemaContent.match(
-    /datasource\s+\w+\s*\{[\s\S]*?provider\s*=\s*"([^"]+)"[\s\S]*?\}/,
-  );
-  const provider = providerMatch
-    ? providerMatch[1].toLowerCase()
-    : "postgresql";
-
-  result = result.replace(/datasource\s+\w+\s*\{[\s\S]*?\}\s*/g, "");
-  result = result.replace(/generator\s+\w+\s*\{[\s\S]*?\}\s*/g, "");
-  result = result.replace(/\n{3,}/g, "\n\n").trim();
-
-  const header = `datasource db {
-  provider = "${provider}"
-}
-
-generator client {
-  provider = "prisma-client"
-}
-
-`;
-
-  return header + result;
-}
+export { buildValidationSchema as transformSchemaForValidation } from "./database-utils.js";
 
 async function _getWorkspaceClientImpl(
   workspaceId: string,
-  usePrismaSql = false,
+  usePrismaSql = false
 ): Promise<any> {
-  const entry = clientCache.get(workspaceId);
+  const key = cacheKey(workspaceId, usePrismaSql);
+  const entry = clientCache.get(key);
 
   if (entry && !entry.disconnecting) {
-    const updated = { ...entry, lastUsed: Date.now() };
-    clientCache.set(workspaceId, updated);
-    return updated.client;
+    entry.lastUsed = Date.now();
+    return entry.client;
   }
 
   const workspace = await getWorkspaceById(workspaceId);
@@ -478,7 +370,7 @@ async function _getWorkspaceClientImpl(
   const databaseUrl = workspace.databaseUrl;
   if (!databaseUrl)
     throw new Error(
-      "Workspace has no databaseUrl. Add one to execute queries.",
+      "Workspace has no databaseUrl. Add one to execute queries."
     );
 
   if (clientCache.size >= MAX_CACHED_CLIENTS) {
@@ -499,7 +391,7 @@ async function _getWorkspaceClientImpl(
   const possibleEntries = [
     join(clientPath, "index.js"),
     join(clientPath, "client.js"),
-    join(clientPath, "default.js"),
+    join(clientPath, "default.js")
   ];
 
   let clientModule: any = null;
@@ -521,7 +413,7 @@ async function _getWorkspaceClientImpl(
 
   if (!clientModule) {
     throw new Error(
-      `Generated Prisma Client not found in ${clientPath}. Last error: ${lastError?.message}`,
+      `Generated Prisma Client not found in ${clientPath}. Last error: ${lastError?.message}`
     );
   }
 
@@ -531,15 +423,16 @@ async function _getWorkspaceClientImpl(
   if (!ClientClass) {
     const available = Object.keys(clientModule).join(", ");
     throw new Error(
-      `PrismaClient not found in generated client. Available exports: ${available}`,
+      `PrismaClient not found in generated client. Available exports: ${available}`
     );
   }
 
   const adapter = await createAdapterForProvider(
     workspace.provider,
-    databaseUrl,
+    databaseUrl
   );
-  let client = new ClientClass({ adapter, log: ["query", "error", "warn"] });
+  let client = new ClientClass({ adapter });
+  let externalResource: any | null = null;
 
   if (
     usePrismaSql &&
@@ -557,33 +450,27 @@ async function _getWorkspaceClientImpl(
           if (workspace.provider === "postgresql") {
             const postgres = (await import("postgres")).default;
             const sql = postgres(databaseUrl);
+            externalResource = sql;
             client = client.$extends(speedExtension({ postgres: sql }));
-            console.log(
-              "[workspace-manager] Using prisma-sql extension for PostgreSQL",
-            );
           } else if (workspace.provider === "sqlite") {
             const Database = (await import("better-sqlite3")).default;
             const dbPath = databaseUrl.replace("file:", "");
             const db = new Database(dbPath);
+            externalResource = db;
             client = client.$extends(speedExtension({ sqlite: db }));
-            console.log(
-              "[workspace-manager] Using prisma-sql extension for SQLite",
-            );
           }
-        } else {
-          console.warn(
-            "[workspace-manager] speedExtension not found in generated SQL",
+          debug(
+            "workspace-manager",
+            "Applied prisma-sql extension for",
+            workspace.provider
           );
         }
-      } else {
-        console.warn(
-          "[workspace-manager] SQL extension not generated, using standard client",
-        );
       }
     } catch (error) {
-      console.warn(
-        "[workspace-manager] Failed to load prisma-sql extension:",
-        error,
+      debugWarn(
+        "workspace-manager",
+        "Failed to load prisma-sql extension:",
+        error
       );
     }
   }
@@ -592,6 +479,7 @@ async function _getWorkspaceClientImpl(
     await client.$connect();
   } catch (error) {
     await client.$disconnect().catch(() => {});
+    await closeExternalResource(externalResource);
     throw error;
   }
 
@@ -600,56 +488,62 @@ async function _getWorkspaceClientImpl(
     lastUsed: Date.now(),
     activeQueries: 0,
     disconnecting: false,
+    usePrismaSql,
+    externalResource
   };
 
-  clientCache.set(workspaceId, newEntry);
+  clientCache.set(key, newEntry);
+  ensureCleanupStarted();
 
   return client;
 }
 
 export async function getWorkspaceClient(
   workspaceId: string,
-  usePrismaSql = false,
+  usePrismaSql = false
 ): Promise<any> {
-  const existing = clientLocks.get(workspaceId);
+  const lockKey = cacheKey(workspaceId, usePrismaSql);
+  const existing = clientLocks.get(lockKey);
   if (existing) return existing;
 
   const promise = _getWorkspaceClientImpl(workspaceId, usePrismaSql);
-  clientLocks.set(workspaceId, promise);
+  clientLocks.set(lockKey, promise);
 
   try {
     return await promise;
   } finally {
-    clientLocks.delete(workspaceId);
+    clientLocks.delete(lockKey);
   }
 }
 
 export async function incrementActiveQueries(
   workspaceId: string,
+  usePrismaSql: boolean
 ): Promise<void> {
-  const entry = clientCache.get(workspaceId);
+  const entry = clientCache.get(cacheKey(workspaceId, usePrismaSql));
   if (entry) entry.activeQueries++;
 }
 
 export async function decrementActiveQueries(
   workspaceId: string,
+  usePrismaSql: boolean
 ): Promise<void> {
-  const entry = clientCache.get(workspaceId);
+  const entry = clientCache.get(cacheKey(workspaceId, usePrismaSql));
   if (entry && entry.activeQueries > 0) entry.activeQueries--;
 }
 
 export async function deleteWorkspace(workspaceId: string): Promise<boolean> {
-  const entry = clientCache.get(workspaceId);
+  const entries = getCacheEntriesForWorkspace(workspaceId);
 
-  if (entry) {
+  for (const [key, entry] of entries) {
     if (entry.activeQueries > 0) {
       throw new Error("Cannot delete workspace with active queries");
     }
-
-    entry.disconnecting = true;
-    await entry.client.$disconnect().catch(() => {});
-    clientCache.delete(workspaceId);
+    await closeClientEntry(entry);
+    clientCache.delete(key);
   }
+
+  dmmfCache.delete(workspaceId);
 
   const workspaceDir = getWorkspaceDir(workspaceId);
   const clientPath = join(workspaceDir, "generated", "client");
@@ -670,12 +564,16 @@ export async function deleteWorkspace(workspaceId: string): Promise<boolean> {
 }
 
 export function clearWorkspaceCache(workspaceId: string): void {
-  const entry = clientCache.get(workspaceId);
-  if (entry && !entry.disconnecting) {
-    entry.disconnecting = true;
-    entry.client.$disconnect().catch(() => {});
-    clientCache.delete(workspaceId);
+  const entries = getCacheEntriesForWorkspace(workspaceId);
+
+  for (const [key, entry] of entries) {
+    if (!entry.disconnecting && entry.activeQueries === 0) {
+      closeClientEntry(entry).catch(() => {});
+      clientCache.delete(key);
+    }
   }
+
+  dmmfCache.delete(workspaceId);
 
   const workspaceDir = getWorkspaceDir(workspaceId);
   const clientPath = join(workspaceDir, "generated", "client");
@@ -688,7 +586,7 @@ export async function listWorkspaces(): Promise<
   const queriesDb = await getQueriesDb();
   return queriesDb.workspace.findMany({
     select: { id: true, name: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "desc" }
   });
 }
 
@@ -696,28 +594,28 @@ async function cleanupIdleClients(): Promise<void> {
   const now = Date.now();
   const toRemove: string[] = [];
 
-  for (const [id, entry] of clientCache.entries()) {
+  for (const [key, entry] of clientCache.entries()) {
     if (
       entry.activeQueries === 0 &&
       !entry.disconnecting &&
       now - entry.lastUsed > CLIENT_IDLE_TIMEOUT
     ) {
-      toRemove.push(id);
+      toRemove.push(key);
     }
   }
 
-  for (const id of toRemove) {
-    const entry = clientCache.get(id);
+  for (const key of toRemove) {
+    const entry = clientCache.get(key);
     if (entry) {
-      entry.disconnecting = true;
-      await entry.client.$disconnect().catch(() => {});
-      clientCache.delete(id);
+      await closeClientEntry(entry);
+      clientCache.delete(key);
     }
   }
 }
 
-export function startCleanup(): void {
-  if (!cleanupInterval) {
+function ensureCleanupStarted(): void {
+  if (!cleanupStarted) {
+    cleanupStarted = true;
     cleanupInterval = setInterval(() => cleanupIdleClients(), 60000);
   }
 }
@@ -726,21 +624,20 @@ export function stopCleanup(): void {
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
+    cleanupStarted = false;
   }
 }
-
-startCleanup();
 
 if (import.meta.hot) {
   import.meta.hot.dispose(async () => {
     stopCleanup();
 
-    for (const [id, entry] of clientCache.entries()) {
-      entry.disconnecting = true;
-      await entry.client.$disconnect().catch(() => {});
+    for (const [key, entry] of clientCache.entries()) {
+      await closeClientEntry(entry);
     }
 
     clientCache.clear();
     clientLocks.clear();
+    dmmfCache.clear();
   });
 }

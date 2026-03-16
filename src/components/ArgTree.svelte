@@ -11,6 +11,14 @@
     PayloadValue,
     DmmfInputTypeRef,
   } from "../lib/types.ts";
+  import { isPlainObject } from "../lib/helpers.ts";
+  import {
+    isObjectRef,
+    isEnumRef,
+    isScalarRef,
+    hasEnumType,
+    getEnumTypeName,
+  } from "../lib/dmmf-utils.ts";
 
   let {
     operation,
@@ -19,16 +27,20 @@
     onaddarg,
     ontogglefield,
     onbreadcrumbclick,
+    onaddarrayitem,
+    onremovearrayitem,
   }: {
     operation: Operation;
     parser: DMMFParser;
     queryState: QueryState;
-    onaddarg: (argName: string, initialValue?: PayloadValue) => void;
+    onaddarg: (argName: string | string[], initialValue?: PayloadValue) => void;
     ontogglefield: (detail: {
       field: string;
       value: PayloadValue | undefined;
     }) => void;
     onbreadcrumbclick: (index: number) => void;
+    onaddarrayitem: (arrayPath: string[]) => void;
+    onremovearrayitem: (arrayPath: string[], index: number) => void;
   } = $props();
 
   type EnumOption = {
@@ -36,56 +48,101 @@
     value: string;
   };
 
+  function handleCardKeydown(callback: () => void) {
+    return (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        callback();
+      }
+    };
+  }
+
+  function resolveNodeAtPath(): {
+    arg?: ArgDefinition;
+    field?: FieldDefinition;
+    objectTypeName?: string | null;
+    enumTypeName?: string | null;
+  } | null {
+    if (queryState.path.length === 0) return null;
+
+    const [first, ...rest] = queryState.path;
+    const topArg = operation.args.find((a) => a.name === first);
+    if (!topArg) return null;
+
+    if (rest.length === 0) {
+      return {
+        arg: topArg,
+        objectTypeName: topArg.objectTypeName ?? null,
+        enumTypeName: getEnumTypeName(topArg.inputTypes ?? []),
+      };
+    }
+
+    let currentType = topArg.objectTypeName ?? null;
+    let currentField: FieldDefinition | undefined;
+    let currentIsListOnly = isListOnlyArg(topArg.inputTypes ?? []);
+
+    for (let i = 0; i < rest.length; i++) {
+      const segment = rest[i];
+
+      if (currentIsListOnly && /^\d+$/.test(segment)) {
+        currentIsListOnly = false;
+        continue;
+      }
+
+      if (!currentType) return null;
+
+      const fields = parser.getInputTypeFields(currentType);
+      currentField = fields.find((f) => f.name === segment);
+      if (!currentField) return null;
+
+      currentType = currentField.objectTypeName ?? null;
+      currentIsListOnly = isListOnlyField(currentField.inputTypes ?? []);
+    }
+
+    return {
+      field: currentField,
+      objectTypeName: currentType,
+      enumTypeName: currentField
+        ? getEnumTypeName(currentField.inputTypes ?? [])
+        : null,
+    };
+  }
+
   function getCurrentContext(): ArgContext {
     if (queryState.path.length === 0) return null;
 
-    const firstArg = queryState.path[0];
-    if (firstArg === "select") return "select";
-    if (firstArg === "include") return "include";
-    if (firstArg === "where") return "where";
-    if (firstArg === "data") return "data";
-    if (firstArg === "orderBy") return "orderBy";
+    const node = resolveNodeAtPath();
+    if (node?.objectTypeName) {
+      const typeName = node.objectTypeName;
+      if (typeName.endsWith("Select")) return "select";
+      if (typeName.endsWith("Include")) return "include";
+      if (
+        typeName.includes("WhereInput") ||
+        typeName.includes("WhereUniqueInput") ||
+        typeName.includes("Filter") ||
+        typeName.includes("ListRelationFilter")
+      )
+        return "where";
+      if (typeName.includes("OrderBy")) return "orderBy";
+      if (
+        typeName.includes("CreateInput") ||
+        typeName.includes("CreateMany") ||
+        typeName.includes("UpdateInput") ||
+        typeName.includes("UpdateMany") ||
+        typeName.includes("UncheckedCreate") ||
+        typeName.includes("UncheckedUpdate")
+      )
+        return "data";
+    }
+
+    const lastSegment = queryState.path[queryState.path.length - 1];
+    if (lastSegment === "where") return "where";
+    if (lastSegment === "data") return "data";
+    if (lastSegment === "orderBy") return "orderBy";
+    if (lastSegment === "select") return "select";
+    if (lastSegment === "include") return "include";
 
     return null;
-  }
-
-  function isObjectRef(r: DmmfInputTypeRef): boolean {
-    const loc = (r.location ?? "").toLowerCase();
-    const kind = (r.kind ?? "").toLowerCase();
-    if (kind === "object") return true;
-    if (loc.includes("inputobject")) return true;
-    if (loc === "inputobjecttypes") return true;
-    return false;
-  }
-
-  function isEnumRef(r: DmmfInputTypeRef): boolean {
-    const loc = (r.location ?? "").toLowerCase();
-    const kind = (r.kind ?? "").toLowerCase();
-    if (kind === "enum") return true;
-    if (loc.includes("enum")) return true;
-    if (loc === "enumtypes") return true;
-    return false;
-  }
-
-  function isScalarRef(r: DmmfInputTypeRef): boolean {
-    const loc = (r.location ?? "").toLowerCase();
-    const kind = (r.kind ?? "").toLowerCase();
-    if (kind === "scalar") return true;
-    if (loc === "scalar") return true;
-    return !isObjectRef(r) && !isEnumRef(r);
-  }
-
-  function getEnumTypeName(refs: DmmfInputTypeRef[]): string | null {
-    const enumRef = refs.find((r) => r.type && isEnumRef(r));
-    return enumRef?.type ?? null;
-  }
-
-  function hasEnumType(refs: DmmfInputTypeRef[]): boolean {
-    return refs.some((r) => r.type && isEnumRef(r));
-  }
-
-  function hasObjectType(refs: DmmfInputTypeRef[]): boolean {
-    return refs.some((r) => r.type && isObjectRef(r));
   }
 
   function defaultScalarValue(typeName: string): PayloadValue {
@@ -95,6 +152,16 @@
       return 0;
     if (t === "DateTime") return new Date().toISOString();
     return "";
+  }
+
+  function isListOnlyField(refs: DmmfInputTypeRef[]): boolean {
+    const objectRefs = refs.filter((r) => r.type && isObjectRef(r));
+    if (objectRefs.length === 0) return false;
+    return objectRefs.every((r) => r.isList);
+  }
+
+  function isListOnlyArg(refs: DmmfInputTypeRef[]): boolean {
+    return isListOnlyField(refs);
   }
 
   function defaultValueForInputTypes(
@@ -140,10 +207,20 @@
     }
 
     const isList = refs.some((r) => r.isList);
-    if (isList) return [];
+    if (isList) {
+      const listRef = refs.find((r) => r.isList);
+      if (listRef && isObjectRef(listRef)) return [{}];
+      if (listRef && isEnumRef(listRef)) {
+        const enumValues = parser.getEnumValues(listRef.type);
+        return enumValues.length > 0 ? [enumValues[0]] : [];
+      }
+      if (listRef && isScalarRef(listRef)) {
+        return [defaultScalarValue(listRef.type)];
+      }
+      return [];
+    }
 
     const hasEnum = hasEnumType(refs);
-    const hasObject = hasObjectType(refs);
 
     if (hasEnum) {
       const enumRef = refs.find((r) => r.type && isEnumRef(r));
@@ -156,17 +233,12 @@
     const objectRef = refs.find((r) => r.type && isObjectRef(r));
     const scalarRef = refs.find((r) => r.type && isScalarRef(r));
 
-    // FIXED: For where context, handle filter objects vs scalar values properly
     if (context === "where") {
-      // If it has object types (like StringFilter), prefer that
       if (objectRef) {
         const fields = parser.getInputTypeFields(objectRef.type);
-        // Only return {} if it actually has fields to expand
         if (fields.length > 0) return {};
       }
-      // For direct scalar filters (leaf values like not, equals, etc.)
-      // Don't set a default - let user provide the value
-      if (scalarRef && !objectRef) return null;
+      if (scalarRef && !objectRef) return defaultScalarValue(scalarRef.type);
       return {};
     }
 
@@ -187,22 +259,38 @@
     return "";
   }
 
-  function isPlainObject(v: unknown): v is Record<string, unknown> {
-    return typeof v === "object" && v !== null && !Array.isArray(v);
-  }
-
   let currentNodePayload = $derived.by(() => {
     let current: any = queryState.payload;
 
     for (const key of queryState.path) {
       if (current === null || typeof current !== "object") return null;
-      if (current[key] === undefined) return null;
-      current = current[key];
+      if (Array.isArray(current) && /^\d+$/.test(key)) {
+        current = current[parseInt(key, 10)];
+      } else {
+        if (current[key] === undefined) return null;
+        current = current[key];
+      }
     }
 
     if (current === null || typeof current !== "object") return null;
     return current;
   });
+
+  function getCurrentPathValue(): PayloadValue | undefined {
+    if (queryState.path.length === 0) return undefined;
+
+    let current: any = queryState.payload;
+    for (const key of queryState.path) {
+      if (current === null || typeof current !== "object") return undefined;
+      if (Array.isArray(current) && /^\d+$/.test(key)) {
+        current = current[parseInt(key, 10)];
+      } else {
+        if (current[key] === undefined) return undefined;
+        current = current[key];
+      }
+    }
+    return current as PayloadValue;
+  }
 
   function getFieldValue(fieldName: string): any {
     if (!currentNodePayload) return undefined;
@@ -213,51 +301,12 @@
     return (queryState.payload as any)[argName];
   }
 
-  function resolveNodeAtPath(): {
-    arg?: ArgDefinition;
-    field?: FieldDefinition;
-    objectTypeName?: string | null;
-    enumTypeName?: string | null;
-  } | null {
-    if (queryState.path.length === 0) return null;
-
-    const [first, ...rest] = queryState.path;
-    const topArg = operation.args.find((a) => a.name === first);
-    if (!topArg) return null;
-
-    if (rest.length === 0) {
-      return {
-        arg: topArg,
-        objectTypeName: topArg.objectTypeName ?? null,
-        enumTypeName: getEnumTypeName(topArg.inputTypes ?? []),
-      };
-    }
-
-    let currentType = topArg.objectTypeName ?? null;
-    let currentField: FieldDefinition | undefined;
-
-    for (let i = 0; i < rest.length; i++) {
-      if (!currentType) return null;
-
-      const fields = parser.getInputTypeFields(currentType);
-      currentField = fields.find((f) => f.name === rest[i]);
-      if (!currentField) return null;
-
-      currentType = currentField.objectTypeName ?? null;
-    }
-
-    return {
-      field: currentField,
-      objectTypeName: currentType,
-      enumTypeName: currentField
-        ? getEnumTypeName(currentField.inputTypes ?? [])
-        : null,
-    };
-  }
-
   function getCurrentEnumOptions(): EnumOption[] | null {
     const node = resolveNodeAtPath();
     if (!node?.enumTypeName) return null;
+
+    const ctx = getCurrentContext();
+    if (node.objectTypeName && ctx === "where") return null;
 
     const values = parser.getEnumValues(node.enumTypeName);
     return values.map((v) => ({ name: v, value: v }));
@@ -278,17 +327,8 @@
     return [];
   }
 
-  function shouldShowField(
-    _field: FieldDefinition,
-    _context: ArgContext,
-  ): boolean {
-    return true;
-  }
-
   function fieldHasChildren(field: FieldDefinition): boolean {
     const refs = field.inputTypes ?? [];
-
-    if (hasEnumType(refs)) return false;
 
     const hasObject = refs.some((r) => r.type && isObjectRef(r));
     if (!hasObject) return false;
@@ -300,6 +340,18 @@
     return childFields.length > 0;
   }
 
+  function fieldIsNavigable(field: FieldDefinition): boolean {
+    if (!fieldHasChildren(field)) return false;
+    const refs = field.inputTypes ?? [];
+    return !isListOnlyField(refs);
+  }
+
+  function fieldIsListOnlyNavigable(field: FieldDefinition): boolean {
+    if (!fieldHasChildren(field)) return false;
+    const refs = field.inputTypes ?? [];
+    return isListOnlyField(refs);
+  }
+
   function fieldIsEnum(field: FieldDefinition): boolean {
     const refs = field.inputTypes ?? [];
     if (!hasEnumType(refs)) return false;
@@ -309,10 +361,13 @@
     return parser.getEnumValues(enumTypeName).length > 0;
   }
 
+  function fieldIsListOnly(field: FieldDefinition): boolean {
+    const refs = field.inputTypes ?? [];
+    return isListOnlyField(refs);
+  }
+
   function argHasChildren(arg: ArgDefinition): boolean {
     const refs = arg.inputTypes ?? [];
-
-    if (hasEnumType(refs)) return false;
 
     const hasObject = refs.some((r) => r.type && isObjectRef(r));
     if (!hasObject) return false;
@@ -324,6 +379,18 @@
     return childFields.length > 0;
   }
 
+  function argIsNavigable(arg: ArgDefinition): boolean {
+    if (!argHasChildren(arg)) return false;
+    const refs = arg.inputTypes ?? [];
+    return !isListOnlyArg(refs);
+  }
+
+  function argIsListOnlyNavigable(arg: ArgDefinition): boolean {
+    if (!argHasChildren(arg)) return false;
+    const refs = arg.inputTypes ?? [];
+    return isListOnlyArg(refs);
+  }
+
   function argIsEnum(arg: ArgDefinition): boolean {
     const refs = arg.inputTypes ?? [];
     if (!hasEnumType(refs)) return false;
@@ -333,27 +400,177 @@
     return parser.getEnumValues(enumTypeName).length > 0;
   }
 
+  function argIsListOnly(arg: ArgDefinition): boolean {
+    const refs = arg.inputTypes ?? [];
+    return isListOnlyArg(refs);
+  }
+
+  function shouldPreferExpand(
+    hasChildren: boolean,
+    isNavigable: boolean,
+    isEnum: boolean,
+    ctx: ArgContext,
+  ): boolean {
+    if (!hasChildren) return false;
+    if (!isNavigable) return false;
+    if (isEnum && ctx !== "where") return false;
+    return true;
+  }
+
+  let isAtArrayLevel = $derived.by(() => {
+    if (queryState.path.length === 0) return false;
+    const lastSegment = queryState.path[queryState.path.length - 1];
+    if (/^\d+$/.test(lastSegment)) return false;
+
+    const [first, ...rest] = queryState.path;
+    const topArg = operation.args.find((a) => a.name === first);
+    if (!topArg) return false;
+
+    if (rest.length === 0) {
+      return isListOnlyArg(topArg.inputTypes ?? []);
+    }
+
+    let currentType = topArg.objectTypeName ?? null;
+    let currentIsListOnly = isListOnlyArg(topArg.inputTypes ?? []);
+
+    for (let i = 0; i < rest.length; i++) {
+      const segment = rest[i];
+      if (currentIsListOnly && /^\d+$/.test(segment)) {
+        currentIsListOnly = false;
+        continue;
+      }
+      if (!currentType) return false;
+      const fields = parser.getInputTypeFields(currentType);
+      const field = fields.find((f) => f.name === segment);
+      if (!field) return false;
+      currentType = field.objectTypeName ?? null;
+      currentIsListOnly = isListOnlyField(field.inputTypes ?? []);
+    }
+
+    return currentIsListOnly;
+  });
+
+  let currentArrayValue = $derived.by((): PayloadValue[] | null => {
+    if (!isAtArrayLevel) return null;
+    let current: any = queryState.payload;
+    for (const key of queryState.path) {
+      if (current === null || typeof current !== "object") return null;
+      if (Array.isArray(current) && /^\d+$/.test(key)) {
+        current = current[parseInt(key, 10)];
+      } else {
+        current = current[key];
+      }
+    }
+    return Array.isArray(current) ? current : null;
+  });
+
+  let arrayInfo = $derived.by(() => {
+    if (isAtArrayLevel) return null;
+    for (let i = queryState.path.length - 1; i >= 0; i--) {
+      if (/^\d+$/.test(queryState.path[i])) {
+        return {
+          arrayPath: queryState.path.slice(0, i),
+          itemIndex: parseInt(queryState.path[i], 10),
+          itemPathIndex: i,
+        };
+      }
+    }
+    return null;
+  });
+
+  let arrayBarContext = $derived.by(() => {
+    if (!arrayInfo) return null;
+    let current: any = queryState.payload;
+    for (const key of arrayInfo.arrayPath) {
+      if (current === null || typeof current !== "object") return null;
+      if (Array.isArray(current) && /^\d+$/.test(key)) {
+        current = current[parseInt(key, 10)];
+      } else {
+        current = current[key];
+      }
+    }
+    if (!Array.isArray(current)) return null;
+    return {
+      currentIndex: arrayInfo.itemIndex,
+      totalItems: current.length,
+      arrayPath: arrayInfo.arrayPath,
+    };
+  });
+
+  function navigateToArrayItem(targetIndex: number) {
+    const path = isAtArrayLevel
+      ? [...queryState.path]
+      : (arrayInfo?.arrayPath ?? null);
+    if (!path || path.length === 0) return;
+    const fieldName = path[path.length - 1];
+    const parentBreadcrumbIndex = path.length - 2;
+    onbreadcrumbclick(parentBreadcrumbIndex);
+    onaddarg([fieldName, String(targetIndex)], {});
+  }
+
+  function handleAddArrayItemFromOverview() {
+    if (!isAtArrayLevel) return;
+    const arrPath = [...queryState.path];
+    const currentArr = currentArrayValue;
+    const newIndex = currentArr ? currentArr.length : 0;
+    const fieldName = arrPath[arrPath.length - 1];
+    const parentBreadcrumbIndex = arrPath.length - 2;
+    onaddarrayitem([...arrPath]);
+    onbreadcrumbclick(parentBreadcrumbIndex);
+    onaddarg([fieldName, String(newIndex)], {});
+  }
+
+  function handleAddArrayItemInline() {
+    if (!arrayBarContext) return;
+    onaddarrayitem([...arrayBarContext.arrayPath]);
+  }
+
+  function handleRemoveCurrentItem() {
+    if (!arrayBarContext) return;
+    onremovearrayitem(
+      [...arrayBarContext.arrayPath],
+      arrayBarContext.currentIndex,
+    );
+  }
+
   function handleArgClick(arg: ArgDefinition) {
     const hasChildren = argHasChildren(arg);
+    const isNavigable = argIsNavigable(arg);
+    const isListNav = argIsListOnlyNavigable(arg);
     const isEnum = argIsEnum(arg);
+    const isListTyped = argIsListOnly(arg);
     const currentValue = getArgValue(arg.name);
+    const ctx = getCurrentContext();
 
-    if (isEnum) {
-      if (currentValue !== undefined) {
-        onaddarg(arg.name, currentValue);
+    if (isListNav) {
+      if (
+        currentValue !== undefined &&
+        Array.isArray(currentValue) &&
+        currentValue.length > 0
+      ) {
+        onaddarg([arg.name, "0"], currentValue[0] as PayloadValue);
       } else {
-        const defaultValue = defaultValueForInputTypes(
-          arg.inputTypes,
-          getCurrentContext(),
-        );
-        ontogglefield({ field: arg.name, value: defaultValue });
-        onaddarg(arg.name, defaultValue);
+        ontogglefield({ field: arg.name, value: [{}] });
+        onaddarg([arg.name, "0"], {});
       }
       return;
     }
 
-    if (hasChildren) {
-      if (currentValue !== undefined && isPlainObject(currentValue)) {
+    if (isListTyped) {
+      if (currentValue !== undefined) {
+        ontogglefield({ field: arg.name, value: undefined });
+      } else {
+        const defaultValue = defaultValueForInputTypes(arg.inputTypes, ctx);
+        ontogglefield({ field: arg.name, value: defaultValue });
+      }
+      return;
+    }
+
+    if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
+      if (
+        currentValue !== undefined &&
+        isPlainObject(currentValue as unknown)
+      ) {
         onaddarg(arg.name, currentValue as PayloadValue);
       } else {
         ontogglefield({ field: arg.name, value: {} });
@@ -362,13 +579,21 @@
       return;
     }
 
+    if (isEnum) {
+      if (currentValue !== undefined) {
+        onaddarg(arg.name, currentValue);
+      } else {
+        const defaultValue = defaultValueForInputTypes(arg.inputTypes, ctx);
+        ontogglefield({ field: arg.name, value: defaultValue });
+        onaddarg(arg.name, defaultValue);
+      }
+      return;
+    }
+
     if (currentValue !== undefined) {
       ontogglefield({ field: arg.name, value: undefined });
     } else {
-      const defaultValue = defaultValueForInputTypes(
-        arg.inputTypes,
-        getCurrentContext(),
-      );
+      const defaultValue = defaultValueForInputTypes(arg.inputTypes, ctx);
       ontogglefield({ field: arg.name, value: defaultValue });
     }
   }
@@ -376,14 +601,22 @@
   function handleArgButtonClick(arg: ArgDefinition, event: MouseEvent) {
     event.stopPropagation();
     const currentValue = getArgValue(arg.name);
+    const ctx = getCurrentContext();
 
     if (currentValue === undefined) {
+      const isNavigable = argIsNavigable(arg);
+      const isListNav = argIsListOnlyNavigable(arg);
+      const isListTyped = argIsListOnly(arg);
+      const hasChildren = argHasChildren(arg);
       const isEnum = argIsEnum(arg);
-      if (isEnum) {
-        const defaultValue = defaultValueForInputTypes(
-          arg.inputTypes,
-          getCurrentContext(),
-        );
+
+      if (isListNav || isListTyped) {
+        const defaultValue = defaultValueForInputTypes(arg.inputTypes, ctx);
+        ontogglefield({ field: arg.name, value: defaultValue });
+      } else if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
+        ontogglefield({ field: arg.name, value: {} });
+      } else if (isEnum) {
+        const defaultValue = defaultValueForInputTypes(arg.inputTypes, ctx);
         ontogglefield({ field: arg.name, value: defaultValue });
       } else {
         ontogglefield({ field: arg.name, value: {} });
@@ -395,29 +628,44 @@
 
   function handleFieldClick(field: FieldDefinition) {
     const hasChildren = fieldHasChildren(field);
+    const isNavigable = fieldIsNavigable(field);
+    const isListNav = fieldIsListOnlyNavigable(field);
     const isEnum = fieldIsEnum(field);
+    const isListTyped = fieldIsListOnly(field);
     const currentValue = getFieldValue(field.name);
+    const ctx = getCurrentContext();
 
-    if (isEnum) {
-      if (currentValue !== undefined) {
-        onaddarg(field.name, currentValue);
+    if (isListNav) {
+      if (
+        currentValue !== undefined &&
+        Array.isArray(currentValue) &&
+        currentValue.length > 0
+      ) {
+        onaddarg([field.name, "0"], currentValue[0] as PayloadValue);
       } else {
-        const defaultValue = defaultValueForInputTypes(
-          field.inputTypes,
-          getCurrentContext(),
-        );
-        ontogglefield({ field: field.name, value: defaultValue });
-        onaddarg(field.name, defaultValue);
+        ontogglefield({ field: field.name, value: [{}] });
+        onaddarg([field.name, "0"], {});
       }
       return;
     }
 
-    if (hasChildren) {
-      if (isPlainObject(currentValue)) {
+    if (isListTyped) {
+      if (currentValue !== undefined) {
+        ontogglefield({ field: field.name, value: undefined });
+      } else {
+        const defaultValue = defaultValueForInputTypes(field.inputTypes, ctx);
+        ontogglefield({ field: field.name, value: defaultValue });
+      }
+      return;
+    }
+
+    if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
+      if (
+        currentValue !== undefined &&
+        isPlainObject(currentValue as unknown)
+      ) {
         onaddarg(field.name, currentValue as PayloadValue);
       } else {
-        // FIXED: For relation fields in select/include context, initialize with select wrapper
-        const ctx = getCurrentContext();
         if ((ctx === "select" || ctx === "include") && field.isRelation) {
           ontogglefield({ field: field.name, value: { select: {} } });
           onaddarg(field.name, { select: {} });
@@ -429,7 +677,17 @@
       return;
     }
 
-    const ctx = getCurrentContext();
+    if (isEnum) {
+      if (currentValue !== undefined) {
+        onaddarg(field.name, currentValue);
+      } else {
+        const defaultValue = defaultValueForInputTypes(field.inputTypes, ctx);
+        ontogglefield({ field: field.name, value: defaultValue });
+        onaddarg(field.name, defaultValue);
+      }
+      return;
+    }
+
     if (currentValue !== undefined) {
       ontogglefield({ field: field.name, value: undefined });
     } else {
@@ -437,11 +695,7 @@
         ontogglefield({ field: field.name, value: true });
       } else {
         const defaultValue = defaultValueForInputTypes(field.inputTypes, ctx);
-        if (defaultValue !== null) {
-          ontogglefield({ field: field.name, value: defaultValue });
-        } else {
-          ontogglefield({ field: field.name, value: "" });
-        }
+        ontogglefield({ field: field.name, value: defaultValue });
       }
     }
   }
@@ -449,14 +703,26 @@
   function handleFieldButtonClick(field: FieldDefinition, event: MouseEvent) {
     event.stopPropagation();
     const currentValue = getFieldValue(field.name);
+    const ctx = getCurrentContext();
 
     if (currentValue === undefined) {
+      const isNavigable = fieldIsNavigable(field);
+      const isListNav = fieldIsListOnlyNavigable(field);
+      const isListTyped = fieldIsListOnly(field);
+      const hasChildren = fieldHasChildren(field);
       const isEnum = fieldIsEnum(field);
-      if (isEnum) {
-        const defaultValue = defaultValueForInputTypes(
-          field.inputTypes,
-          getCurrentContext(),
-        );
+
+      if (isListNav || isListTyped) {
+        const defaultValue = defaultValueForInputTypes(field.inputTypes, ctx);
+        ontogglefield({ field: field.name, value: defaultValue });
+      } else if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
+        if ((ctx === "select" || ctx === "include") && field.isRelation) {
+          ontogglefield({ field: field.name, value: { select: {} } });
+        } else {
+          ontogglefield({ field: field.name, value: {} });
+        }
+      } else if (isEnum) {
+        const defaultValue = defaultValueForInputTypes(field.inputTypes, ctx);
         ontogglefield({ field: field.name, value: defaultValue });
       } else {
         ontogglefield({ field: field.name, value: {} });
@@ -480,27 +746,6 @@
   let currentFields = $derived(getCurrentFields());
   let currentEnumOptions = $derived(getCurrentEnumOptions());
   let context = $derived(getCurrentContext());
-  let filteredFields = $derived(
-    currentFields
-      ? currentFields.filter((f) => shouldShowField(f, context))
-      : null,
-  );
-
-  $effect(() => {
-    if (operation) {
-      console.log("[ArgTree Debug]", {
-        method: operation.method,
-        model: operation.model,
-        allArgs: operation.args.map((a) => ({
-          name: a.name,
-          required: a.isRequired,
-          type: a.type,
-        })),
-        hasSelect: operation.args.some((a) => a.name === "select"),
-        hasInclude: operation.args.some((a) => a.name === "include"),
-      });
-    }
-  });
 </script>
 
 <div class="@container flex flex-col h-full">
@@ -513,13 +758,97 @@
     {#each queryState.path as segment, i}
       <span class="text-muted-foreground">/</span>
       <Button variant="ghost" size="sm" onclick={() => onbreadcrumbclick(i)}>
-        {segment}
+        {segment.match(/^\d+$/) ? `[${segment}]` : segment}
       </Button>
     {/each}
   </div>
 
+  {#if arrayBarContext}
+    <div
+      class="h-[40px] shrink-0 flex items-center gap-2 px-4 border-b border-border text-sm"
+    >
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-7 px-2"
+        disabled={arrayBarContext.currentIndex === 0}
+        onclick={() => navigateToArrayItem(arrayBarContext.currentIndex - 1)}
+      >
+        ←
+      </Button>
+      <span class="text-muted-foreground text-xs">
+        Item {arrayBarContext.currentIndex + 1} of {arrayBarContext.totalItems}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-7 px-2"
+        disabled={arrayBarContext.currentIndex >=
+          arrayBarContext.totalItems - 1}
+        onclick={() => navigateToArrayItem(arrayBarContext.currentIndex + 1)}
+      >
+        →
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-7 px-2"
+        onclick={handleAddArrayItemInline}
+      >
+        +
+      </Button>
+      {#if arrayBarContext.totalItems > 1}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 px-2"
+          onclick={handleRemoveCurrentItem}
+        >
+          −
+        </Button>
+      {/if}
+    </div>
+  {/if}
+
   <div class="flex-1 overflow-y-auto p-4">
-    {#if currentEnumOptions}
+    {#if isAtArrayLevel && currentArrayValue}
+      <div class="space-y-4">
+        <div
+          class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+        >
+          Items ({currentArrayValue.length})
+        </div>
+        <div class="space-y-2">
+          {#each currentArrayValue as item, i}
+            {@const fieldCount = isPlainObject(item)
+              ? Object.keys(item).length
+              : 0}
+            <Card
+              class="p-3 cursor-pointer transition-colors hover:border-primary/50"
+              onclick={() => navigateToArrayItem(i)}
+              onkeydown={handleCardKeydown(() => navigateToArrayItem(i))}
+              role="button"
+              tabindex={0}
+            >
+              <div class="flex items-center justify-between">
+                <span class="font-medium">Item {i + 1}</span>
+                <span class="text-xs text-muted-foreground font-mono">
+                  {fieldCount}
+                  {fieldCount === 1 ? "field" : "fields"}
+                </span>
+              </div>
+            </Card>
+          {/each}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={handleAddArrayItemFromOverview}
+        >
+          + Add Item
+        </Button>
+      </div>
+    {:else if currentEnumOptions}
       <div class="space-y-4">
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
@@ -528,14 +857,14 @@
         </div>
         <div class="space-y-2">
           {#each currentEnumOptions as option}
-            {@const currentValue =
-              queryState.path.length > 0
-                ? getFieldValue(queryState.path[queryState.path.length - 1])
-                : undefined}
+            {@const currentValue = getCurrentPathValue()}
             {@const isSelected = currentValue === option.value}
             <Card
               class={`p-3 cursor-pointer transition-colors ${isSelected ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
               onclick={() => handleEnumOptionClick(option)}
+              onkeydown={handleCardKeydown(() => handleEnumOptionClick(option))}
+              role="button"
+              tabindex={0}
             >
               <div class="flex items-center justify-between">
                 <span class="font-medium">{option.name}</span>
@@ -547,7 +876,7 @@
           {/each}
         </div>
       </div>
-    {:else if filteredFields}
+    {:else if currentFields}
       <div class="space-y-4">
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
@@ -555,20 +884,26 @@
           Fields
         </div>
 
-        {#if filteredFields.length === 0}
+        {#if currentFields.length === 0}
           <p class="text-sm text-muted-foreground">No fields available</p>
         {:else}
           <div class="space-y-2">
-            {#each filteredFields as field}
+            {#each currentFields as field}
               {@const v = getFieldValue(field.name)}
               {@const hasChildren = fieldHasChildren(field)}
               {@const isEnum = fieldIsEnum(field)}
-              {@const isExpandable = hasChildren || isEnum}
+              {@const isListTyped = fieldIsListOnly(field)}
+              {@const isListNav = fieldIsListOnlyNavigable(field)}
+              {@const isExpandable =
+                (hasChildren && !isListTyped) || isEnum || isListNav}
               {@const isActive = v !== undefined}
 
               <Card
                 class={`p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
                 onclick={() => handleFieldClick(field)}
+                onkeydown={handleCardKeydown(() => handleFieldClick(field))}
+                role="button"
+                tabindex={0}
               >
                 <div class="flex items-center justify-between gap-2">
                   <div
@@ -588,18 +923,27 @@
                         ? field.relationModel
                         : field.type}
                     </span>
-                    {#if (context === "select" || context === "include") && v === true}
+                    {#if isActive && isListTyped}
+                      <span
+                        class="text-[10px] text-muted-foreground font-mono shrink-0"
+                        >({Array.isArray(v) ? v.length : 1} item{Array.isArray(
+                          v,
+                        ) && v.length !== 1
+                          ? "s"
+                          : ""})</span
+                      >
+                    {:else if (context === "select" || context === "include") && v === true}
                       <span
                         class="text-[10px] text-muted-foreground font-mono shrink-0"
                         >true</span
                       >
-                    {:else if isActive && isEnum}
+                    {:else if isActive && isEnum && !hasChildren}
                       <span
                         class="text-[10px] text-muted-foreground font-mono shrink-0"
                         >= {v}</span
                       >
                     {/if}
-                    {#if !isExpandable && field.objectTypeName}
+                    {#if !isExpandable && !isListTyped && field.objectTypeName}
                       <span
                         class="text-[10px] text-muted-foreground italic shrink-0"
                         >(no fields)</span
@@ -607,7 +951,7 @@
                     {/if}
                   </div>
 
-                  {#if isExpandable}
+                  {#if isExpandable || isListTyped}
                     <Button
                       variant={isActive ? "default" : "secondary"}
                       size="icon"
@@ -634,13 +978,19 @@
           {#each availableArgs as arg}
             {@const hasChildren = argHasChildren(arg)}
             {@const isEnum = argIsEnum(arg)}
-            {@const isExpandable = hasChildren || isEnum}
+            {@const isListTyped = argIsListOnly(arg)}
+            {@const isListNav = argIsListOnlyNavigable(arg)}
+            {@const isExpandable =
+              (hasChildren && !isListTyped) || isEnum || isListNav}
             {@const v = getArgValue(arg.name)}
             {@const isActive = v !== undefined}
 
             <Card
               class={`p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
               onclick={() => handleArgClick(arg)}
+              onkeydown={handleCardKeydown(() => handleArgClick(arg))}
+              role="button"
+              tabindex={0}
             >
               <div class="flex items-center justify-between gap-2">
                 <div
@@ -653,20 +1003,29 @@
                   >
                     {arg.type}
                   </span>
-                  {#if isActive && isEnum}
+                  {#if isActive && isListTyped}
+                    <span
+                      class="text-[10px] text-muted-foreground font-mono shrink-0"
+                      >({Array.isArray(v) ? v.length : 1} item{Array.isArray(
+                        v,
+                      ) && v.length !== 1
+                        ? "s"
+                        : ""})</span
+                    >
+                  {:else if isActive && isEnum && !hasChildren}
                     <span
                       class="text-[10px] text-muted-foreground font-mono shrink-0"
                       >= {v}</span
                     >
                   {/if}
-                  {#if !isExpandable && arg.objectTypeName}
+                  {#if !isExpandable && !isListTyped && arg.objectTypeName}
                     <span
                       class="text-[10px] text-muted-foreground italic shrink-0"
                       >(no fields)</span
                     >
                   {/if}
                 </div>
-                {#if isExpandable}
+                {#if isExpandable || isListTyped}
                   <Button
                     variant={isActive ? "default" : "secondary"}
                     size="icon"

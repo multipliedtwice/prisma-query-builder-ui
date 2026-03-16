@@ -13,8 +13,12 @@ const g = globalThis as GlobalWithDb;
 
 async function ensureInitialized(): Promise<void> {
   if (!g[INIT_KEY]) {
-    const { ensureQueriesDb } = await import("./init-queries-db.js");
-    g[INIT_KEY] = ensureQueriesDb();
+    g[INIT_KEY] = import("./init-queries-db.js")
+      .then((m) => m.ensureQueriesDb())
+      .catch((err) => {
+        g[INIT_KEY] = undefined;
+        throw err;
+      });
   }
   await g[INIT_KEY];
 }
@@ -22,7 +26,9 @@ async function ensureInitialized(): Promise<void> {
 async function createQueriesClient(): Promise<any> {
   await ensureInitialized();
 
-  const { PrismaBetterSqlite3 } = await import("@prisma/adapter-better-sqlite3");
+  const { PrismaBetterSqlite3 } = await import(
+    "@prisma/adapter-better-sqlite3"
+  );
 
   const queriesDbPath = resolve(process.cwd(), "queries.db");
   const adapter = new PrismaBetterSqlite3({ url: `file:${queriesDbPath}` });

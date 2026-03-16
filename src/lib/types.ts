@@ -1,6 +1,12 @@
 import type { DMMF } from "@prisma/generator-helper";
 
-export type ArgContext = "select" | "include" | "where" | "data" | "orderBy" | null;
+export type ArgContext =
+  | "select"
+  | "include"
+  | "where"
+  | "data"
+  | "orderBy"
+  | null;
 export type OperationType = "read" | "write";
 
 export type DmmfInputTypeRef = {
@@ -67,11 +73,23 @@ export type NavigationResult = {
   fields: FieldDefinition[] | null;
 };
 
+export interface QueryBuilderLike {
+  state: QueryState;
+  setOperation(operation: Operation | null): void;
+  addArg(argName: string | string[], initialValue?: PayloadValue): void;
+  toggleField(fieldName: string, value: PayloadValue | undefined): void;
+  replacePayload(payload: Payload): void;
+  removeArg(index: number): void;
+  getPayload(): Payload;
+  addArrayItem(arrayPath: string[]): number;
+  removeArrayItem(arrayPath: string[], index: number): void;
+}
+
 export type QueryTab = {
   id: string;
   label: string;
   isCustomName: boolean;
-  builder: any;
+  builder: QueryBuilderLike;
   workspaceId: string | null;
   savedQueryId: string | null;
   isDirty: boolean;
@@ -105,9 +123,13 @@ export type SessionTab = {
 export interface EmbeddedConfig {
   isEmbedded: boolean;
   disablePersistence: boolean;
+  schemaContent?: string | null;
+  databaseUrl?: string | null;
+  hideHeader?: boolean;
+  hideWorkspaceManager?: boolean;
 }
 
 export const defaultEmbeddedConfig: EmbeddedConfig = {
   isEmbedded: false,
-  disablePersistence: false,
+  disablePersistence: false
 };

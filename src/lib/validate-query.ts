@@ -1,37 +1,16 @@
 import type { DMMFParser } from "./dmmf-parser.ts";
 import type { DmmfInputTypeRef, FieldDefinition, QueryState } from "./types.ts";
+import { isPlainObject } from "./helpers.ts";
+import {
+  isObjectRef,
+  isEnumRef,
+  isScalarRef,
+  pickAllObjectTypeNames,
+  getEnumTypeName,
+  getScalarTypeName
+} from "./dmmf-utils.ts";
 
 type Issue = { path: string; message: string };
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function isObjectRef(r: DmmfInputTypeRef): boolean {
-  const loc = (r.location ?? "").toLowerCase();
-  const kind = (r.kind ?? "").toLowerCase();
-  if (kind === "object") return true;
-  if (loc.includes("inputobject")) return true;
-  if (loc === "inputobjecttypes") return true;
-  return false;
-}
-
-function isEnumRef(r: DmmfInputTypeRef): boolean {
-  const loc = (r.location ?? "").toLowerCase();
-  const kind = (r.kind ?? "").toLowerCase();
-  if (kind === "enum") return true;
-  if (loc.includes("enum")) return true;
-  if (loc === "enumtypes") return true;
-  return false;
-}
-
-function isScalarRef(r: DmmfInputTypeRef): boolean {
-  const loc = (r.location ?? "").toLowerCase();
-  const kind = (r.kind ?? "").toLowerCase();
-  if (kind === "scalar") return true;
-  if (loc === "scalar") return true;
-  return !isObjectRef(r) && !isEnumRef(r);
-}
 
 function issue(path: string, message: string): Issue {
   return { path: path || "$", message };
@@ -72,6 +51,7 @@ function validateScalar(typeName: string, value: unknown): string | null {
     return typeof value === "string" ? null : "must be an ISO datetime string";
 
   if (typeName === "Json") return null;
+  if (typeName === "Null") return null;
 
   return typeof value === "string" ||
     typeof value === "number" ||
@@ -81,75 +61,121 @@ function validateScalar(typeName: string, value: unknown): string | null {
     : "must be a scalar";
 }
 
-function pickObjectTypeName(refs: DmmfInputTypeRef[]): string | null {
-  const obj = refs.find((r) => r.type && isObjectRef(r));
-  return obj?.type ?? null;
-}
+function validateObjectAgainstType(
+  parser: DMMFParser,
+  value: Record<string, unknown>,
+  typeName: string,
+  path: string
+): Issue[] {
+  const typeIssues: Issue[] = [];
+  const fields = parser.getInputTypeFields(typeName);
+  const fieldMap = new Map<string, FieldDefinition>(
+    fields.map((f) => [f.name, f])
+  );
 
-function pickEnumTypeName(refs: DmmfInputTypeRef[]): string | null {
-  const en = refs.find((r) => r.type && isEnumRef(r));
-  return en?.type ?? null;
-}
+  for (const k of Object.keys(value)) {
+    const f = fieldMap.get(k);
+    if (!f) {
+      typeIssues.push(
+        issue(`${path}.${k}`, `unknown field for ${typeName}`)
+      );
+      continue;
+    }
+    const v = value[k];
+    typeIssues.push(
+      ...validateByRefs(parser, v, f.inputTypes ?? [], `${path}.${k}`)
+    );
+  }
 
-function pickScalarTypeName(refs: DmmfInputTypeRef[]): string | null {
-  const sc = refs.find((r) => r.type && isScalarRef(r));
-  return sc?.type ?? null;
+  if (
+    "select" in value &&
+    "include" in value &&
+    value.select !== undefined &&
+    value.include !== undefined
+  ) {
+    typeIssues.push(
+      issue(path, "select and include cannot be used together at the same level")
+    );
+  }
+
+  if (
+    "select" in value &&
+    value.select !== undefined &&
+    !requireNonEmptyObject(value.select)
+  ) {
+    typeIssues.push(issue(`${path}.select`, "must not be empty"));
+  }
+
+  if (
+    "include" in value &&
+    value.include !== undefined &&
+    !requireNonEmptyObject(value.include)
+  ) {
+    typeIssues.push(issue(`${path}.include`, "must not be empty"));
+  }
+
+  return typeIssues;
 }
 
 function validateByRefs(
   parser: DMMFParser,
   value: unknown,
   refs: DmmfInputTypeRef[],
-  path: string,
+  path: string
 ): Issue[] {
   const issues: Issue[] = [];
 
   if (!refs || refs.length === 0) return issues;
 
-  const isList = refs.some((r) => r.isList);
-  if (isList) {
-    if (!Array.isArray(value)) {
-      issues.push(issue(path, "must be an array"));
+  if (value === null) return issues;
+
+  if (Array.isArray(value)) {
+    const listRefs = refs.filter((r) => r.isList);
+    if (listRefs.length === 0) {
+      issues.push(issue(path, "unexpected array value"));
       return issues;
     }
-    const elementRefs = refs.map((r) => ({ ...r, isList: false }));
+    const elementRefs = listRefs.map((r) => ({ ...r, isList: false }));
     value.forEach((item, idx) => {
       issues.push(
-        ...validateByRefs(parser, item, elementRefs, `${path}[${idx}]`),
+        ...validateByRefs(parser, item, elementRefs, `${path}[${idx}]`)
       );
     });
     return issues;
   }
 
-  const objectTypeName = pickObjectTypeName(refs);
-  const enumTypeName = pickEnumTypeName(refs);
-  const scalarTypeName = pickScalarTypeName(refs);
+  const nonListRefs = refs.filter((r) => !r.isList);
+  if (nonListRefs.length === 0) {
+    issues.push(issue(path, "must be an array"));
+    return issues;
+  }
+
+  const allObjectTypeNames = pickAllObjectTypeNames(nonListRefs);
+  const enumTypeName = getEnumTypeName(nonListRefs);
+  const scalarTypeName = getScalarTypeName(nonListRefs);
 
   if (isPlainObject(value)) {
-    if (!objectTypeName) {
+    if (allObjectTypeNames.length === 0) {
       issues.push(issue(path, "unexpected object value"));
       return issues;
     }
 
-    const fields = parser.getInputTypeFields(objectTypeName);
-    const fieldMap = new Map<string, FieldDefinition>(
-      fields.map((f) => [f.name, f]),
-    );
+    let bestIssues: Issue[] | null = null;
 
-    for (const k of Object.keys(value)) {
-      const f = fieldMap.get(k);
-      if (!f) {
-        issues.push(
-          issue(`${path}.${k}`, `unknown field for ${objectTypeName}`),
-        );
-        continue;
-      }
-      const v = (value as any)[k];
-      issues.push(
-        ...validateByRefs(parser, v, f.inputTypes ?? [], `${path}.${k}`),
+    for (const typeName of allObjectTypeNames) {
+      const typeIssues = validateObjectAgainstType(
+        parser,
+        value as Record<string, unknown>,
+        typeName,
+        path
       );
+      if (typeIssues.length === 0) return issues;
+      if (bestIssues === null || typeIssues.length < bestIssues.length) {
+        bestIssues = typeIssues;
+      }
     }
 
+    issues.push(...(bestIssues ?? []));
     return issues;
   }
 
@@ -168,7 +194,7 @@ function validateByRefs(
       return issues;
     }
 
-    if (objectTypeName) {
+    if (allObjectTypeNames.length > 0) {
       issues.push(issue(path, "expected object but got string"));
       return issues;
     }
@@ -182,7 +208,7 @@ function validateByRefs(
     return issues;
   }
 
-  if (objectTypeName) {
+  if (allObjectTypeNames.length > 0) {
     issues.push(issue(path, "must be an object"));
     return issues;
   }
@@ -199,6 +225,7 @@ function validateTopArgs(parser: DMMFParser, state: QueryState): Issue[] {
   }
 
   const payload = state.payload ?? {};
+  const argNames = new Set(op.args.map((a) => a.name));
 
   for (const arg of op.args) {
     if (arg.isRequired && (payload as any)[arg.name] === undefined) {
@@ -206,11 +233,34 @@ function validateTopArgs(parser: DMMFParser, state: QueryState): Issue[] {
     }
   }
 
+  for (const key of Object.keys(payload)) {
+    if (!argNames.has(key)) {
+      issues.push(issue(`$.${key}`, "unknown argument"));
+    }
+  }
+
   for (const arg of op.args) {
     const v = (payload as any)[arg.name];
     if (v === undefined) continue;
     issues.push(
-      ...validateByRefs(parser, v, arg.inputTypes ?? [], `$.${arg.name}`),
+      ...validateByRefs(parser, v, arg.inputTypes ?? [], `$.${arg.name}`)
+    );
+  }
+
+  return issues;
+}
+
+function validateSelectIncludeMutualExclusion(state: QueryState): Issue[] {
+  const issues: Issue[] = [];
+  if (!state.operation) return issues;
+
+  const payload = state.payload ?? {};
+  const select = (payload as any).select;
+  const include = (payload as any).include;
+
+  if (select !== undefined && include !== undefined) {
+    issues.push(
+      issue("$", "select and include cannot be used together at the same level")
     );
   }
 
@@ -221,7 +271,6 @@ function validateNonEmptySelectRules(state: QueryState): Issue[] {
   const issues: Issue[] = [];
   if (!state.operation) return issues;
 
-  const method = state.operation.method;
   const payload = state.payload ?? {};
 
   const select = (payload as any).select;
@@ -233,14 +282,6 @@ function validateNonEmptySelectRules(state: QueryState): Issue[] {
 
   if (include !== undefined && !requireNonEmptyObject(include)) {
     issues.push(issue("$.include", "must not be empty"));
-  }
-
-  if (method === "aggregate") {
-    if (select === undefined) {
-      issues.push(issue("$.select", "is required for aggregate"));
-    } else if (!requireNonEmptyObject(select)) {
-      issues.push(issue("$.select", "must not be empty for aggregate"));
-    }
   }
 
   return issues;
@@ -275,46 +316,60 @@ function validateOrderByNonEmptyRules(state: QueryState): Issue[] {
   return issues;
 }
 
-function validateWhereScalarValues(state: QueryState): Issue[] {
+function validateAggregateRequiresAggregation(state: QueryState): Issue[] {
   const issues: Issue[] = [];
-  const payload = state.payload ?? {};
-  const where = (payload as any).where;
-  
-  if (!where || !isPlainObject(where)) return issues;
+  if (!state.operation) return issues;
+  if (state.operation.method !== "aggregate") return issues;
 
-  function checkWhereObject(obj: any, path: string) {
-    if (!isPlainObject(obj)) return;
-    
-    for (const [key, value] of Object.entries(obj)) {
-      const currentPath = `${path}.${key}`;
-      
-      // Check for empty string values in common filter operators
-      if (['equals', 'not', 'lt', 'lte', 'gt', 'gte', 'contains', 'startsWith', 'endsWith'].includes(key)) {
-        if (value === "" || value === null) {
-          issues.push(issue(currentPath, `filter value cannot be empty`));
-        }
-      }
-      
-      // Recursively check nested objects
-      if (isPlainObject(value)) {
-        checkWhereObject(value, currentPath);
-      }
-    }
+  const payload = state.payload ?? {};
+  const aggregateKeys = ["_count", "_avg", "_sum", "_min", "_max"];
+  const hasAggregation = aggregateKeys.some(
+    (k) => (payload as any)[k] !== undefined
+  );
+
+  if (!hasAggregation) {
+    issues.push(
+      issue(
+        "$",
+        "aggregate requires at least one of: _count, _avg, _sum, _min, _max"
+      )
+    );
   }
-  
-  checkWhereObject(where, "$.where");
+
+  return issues;
+}
+
+function validateGroupByRequiresBy(state: QueryState): Issue[] {
+  const issues: Issue[] = [];
+  if (!state.operation) return issues;
+  if (state.operation.method !== "groupBy") return issues;
+
+  const payload = state.payload ?? {};
+  const by = (payload as any).by;
+
+  if (by === undefined) {
+    issues.push(issue("$.by", "is required for groupBy"));
+    return issues;
+  }
+
+  if (Array.isArray(by) && by.length === 0) {
+    issues.push(issue("$.by", "must not be empty"));
+  }
+
   return issues;
 }
 
 export function validateQueryState(
   parser: DMMFParser,
-  state: QueryState,
+  state: QueryState
 ): { ok: true } | { ok: false; error: string } {
   const issues = [
     ...validateTopArgs(parser, state),
     ...validateNonEmptySelectRules(state),
+    ...validateSelectIncludeMutualExclusion(state),
     ...validateOrderByNonEmptyRules(state),
-    ...validateWhereScalarValues(state),
+    ...validateAggregateRequiresAggregation(state),
+    ...validateGroupByRequiresBy(state)
   ];
 
   if (issues.length === 0) return { ok: true };

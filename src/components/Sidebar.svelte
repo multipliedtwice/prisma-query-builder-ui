@@ -4,9 +4,19 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import Button from "$lib/components/ui/button/button.svelte";
   import Input from "$lib/components/ui/input/input.svelte";
-  import { ChevronDown, FileCode, Database, Upload, Trash2, Loader, Check, Pencil } from "@lucide/svelte";
+  import {
+    ChevronDown,
+    FileCode,
+    Database,
+    Upload,
+    Trash2,
+    Loader,
+    Check,
+    Pencil,
+  } from "@lucide/svelte";
   import { Label } from "$lib/components/ui/label/index.js";
   import type { Operation, OperationType } from "../lib/types.ts";
+  import { formatDate } from "../lib/helpers.ts";
 
   let {
     selectedType,
@@ -27,7 +37,12 @@
     selectedOperation: Operation | null;
     operations: Operation[];
     currentWorkspaceId: string | null;
-    workspaces: Array<{ id: string; name: string; createdAt: Date; databaseUrl?: string | null }>;
+    workspaces: Array<{
+      id: string;
+      name: string;
+      createdAt: Date;
+      hasDatabaseUrl?: boolean;
+    }>;
     hasLocalSchema: boolean;
     showWorkspaceManagement?: boolean;
     onSelectType: (type: OperationType) => void;
@@ -39,7 +54,10 @@
       databaseUrl: string | null,
     ) => Promise<void>;
     onWorkspaceDelete: (workspaceId: string) => void;
-    onWorkspaceUpdate: (workspaceId: string, databaseUrl: string | null) => Promise<void>;
+    onWorkspaceUpdate: (
+      workspaceId: string,
+      databaseUrl: string | null,
+    ) => Promise<void>;
   } = $props();
 
   let groupedOperations = $derived(
@@ -78,11 +96,18 @@
   function handleFileSelect(event: Event) {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
-    if (file) {
-      fileSelected = file;
-      if (!workspaceName) workspaceName = file.name.replace(".prisma", "");
-      showUploadForm = true;
+    if (!file) return;
+
+    if (!file.name.endsWith(".prisma")) {
+      uploadError = "Please select a .prisma file";
+      target.value = "";
+      return;
     }
+
+    fileSelected = file;
+    uploadError = null;
+    if (!workspaceName) workspaceName = file.name.replace(".prisma", "");
+    showUploadForm = true;
   }
 
   async function handleUpload() {
@@ -95,7 +120,7 @@
       await onWorkspaceCreate(
         workspaceName || fileSelected.name,
         fileSelected,
-        databaseUrl.trim() ? databaseUrl.trim() : null
+        databaseUrl.trim() ? databaseUrl.trim() : null,
       );
 
       fileSelected = null;
@@ -125,14 +150,22 @@
 
   function handleDelete(workspaceId: string, event: MouseEvent) {
     event.stopPropagation();
+    const workspace = workspaces.find((w) => w.id === workspaceId);
+    const name = workspace?.name ?? "this workspace";
+    if (
+      !confirm(
+        `Delete "${name}"? This will remove the workspace and all saved queries.`,
+      )
+    ) {
+      return;
+    }
     onWorkspaceDelete(workspaceId);
   }
 
   function startEdit(workspaceId: string, event: MouseEvent) {
     event.stopPropagation();
-    const workspace = workspaces.find((w) => w.id === workspaceId);
     editingWorkspaceId = workspaceId;
-    editDatabaseUrl = workspace?.databaseUrl ?? "";
+    editDatabaseUrl = "";
     updateError = null;
   }
 
@@ -151,7 +184,7 @@
     try {
       await onWorkspaceUpdate(
         editingWorkspaceId,
-        editDatabaseUrl.trim() ? editDatabaseUrl.trim() : null
+        editDatabaseUrl.trim() ? editDatabaseUrl.trim() : null,
       );
       editingWorkspaceId = null;
       editDatabaseUrl = "";
@@ -160,18 +193,6 @@
     } finally {
       updating = false;
     }
-  }
-
-  function formatDate(date: Date): string {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-
-    if (minutes < 1) return "just now";
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return date.toLocaleDateString();
   }
 
   $effect(() => {
@@ -185,20 +206,26 @@
 </script>
 
 <div class="@container flex flex-col bg-background h-full">
-  <!-- Header Section - Conditional based on showWorkspaceManagement -->
   {#if showWorkspaceManagement}
-    <div class="h-[60px] shrink-0 bg-muted/50 border-b border-border px-2 flex items-center">
+    <div
+      class="h-[60px] shrink-0 bg-muted/50 border-b border-border px-2 flex items-center"
+    >
       <DropdownMenu.Root bind:open={dropdownOpen}>
         <DropdownMenu.Trigger class="w-full">
           <Button variant="ghost" class="w-full justify-between px-2 h-9">
-            <span class="text-sm font-semibold truncate" title={activeWorkspaceName}>
+            <span
+              class="text-sm font-semibold truncate"
+              title={activeWorkspaceName}
+            >
               {activeWorkspaceName}
             </span>
             <ChevronDown class="h-4 w-4 ml-2 shrink-0" />
           </Button>
         </DropdownMenu.Trigger>
 
-        <DropdownMenu.Content class="w-[min(95vw,480px)] max-h-[400px] overflow-y-auto">
+        <DropdownMenu.Content
+          class="w-[min(95vw,480px)] max-h-[400px] overflow-y-auto"
+        >
           {#if !showUploadForm && !editingWorkspaceId}
             <DropdownMenu.Label>Select Schema</DropdownMenu.Label>
             <DropdownMenu.Separator />
@@ -211,7 +238,9 @@
                 <Database class="h-4 w-4 text-muted-foreground" />
                 <div class="flex-1">
                   <div class="font-medium">Project Schema</div>
-                  <div class="text-xs text-muted-foreground">prisma/schema.prisma</div>
+                  <div class="text-xs text-muted-foreground">
+                    prisma/schema.prisma
+                  </div>
                 </div>
                 {#if currentWorkspaceId === null}
                   <Check class="h-4 w-4" />
@@ -227,7 +256,9 @@
                 <FileCode class="h-4 w-4 text-primary" />
                 <div class="flex-1">
                   <div class="font-medium">{workspace.name}</div>
-                  <div class="text-xs text-muted-foreground">{formatDate(workspace.createdAt)}</div>
+                  <div class="text-xs text-muted-foreground">
+                    {formatDate(workspace.createdAt)}
+                  </div>
                 </div>
                 <div class="flex items-center gap-1">
                   {#if currentWorkspaceId === workspace.id}
@@ -251,7 +282,10 @@
 
             <DropdownMenu.Separator />
 
-            <DropdownMenu.Item class="cursor-pointer" onclick={() => fileInput?.click()}>
+            <DropdownMenu.Item
+              class="cursor-pointer"
+              onclick={() => fileInput?.click()}
+            >
               <Upload class="h-4 w-4 mr-2" />
               Upload Schema
             </DropdownMenu.Item>
@@ -264,7 +298,9 @@
               onchange={handleFileSelect}
             />
           {:else if editingWorkspaceId}
-            {@const currentWorkspace = workspaces.find((w) => w.id === editingWorkspaceId)}
+            {@const currentWorkspace = workspaces.find(
+              (w) => w.id === editingWorkspaceId,
+            )}
             <div class="p-3 space-y-3">
               <div class="font-semibold text-sm">Edit Database URL</div>
 
@@ -272,6 +308,15 @@
                 <div class="text-xs text-muted-foreground">
                   Workspace: {currentWorkspace.name}
                 </div>
+                {#if currentWorkspace.hasDatabaseUrl}
+                  <div class="text-xs text-green-600 dark:text-green-400">
+                    Database URL is currently configured
+                  </div>
+                {:else}
+                  <div class="text-xs text-muted-foreground italic">
+                    No database URL configured
+                  </div>
+                {/if}
               {/if}
 
               <div class="space-y-2">
@@ -281,11 +326,16 @@
                   type="text"
                   placeholder="postgresql://... (leave empty to remove)"
                   value={editDatabaseUrl}
-                  oninput={(e) => editDatabaseUrl = (e.target as HTMLInputElement).value}
+                  oninput={(e) =>
+                    (editDatabaseUrl = (
+                      e.target as HTMLInputElement
+                    ).value)}
                   disabled={updating}
                   class="h-8 text-sm font-mono"
                 />
-                <p class="text-xs text-muted-foreground">Leave empty to remove database URL</p>
+                <p class="text-xs text-muted-foreground">
+                  Enter new URL or leave empty to remove
+                </p>
               </div>
 
               {#if updateError}
@@ -293,7 +343,11 @@
               {/if}
 
               <div class="flex gap-2">
-                <Button class="flex-1 h-8" onclick={handleUpdate} disabled={updating}>
+                <Button
+                  class="flex-1 h-8"
+                  onclick={handleUpdate}
+                  disabled={updating}
+                >
                   {#if updating}
                     <Loader class="h-3 w-3 mr-2 animate-spin" />
                     Updating...
@@ -301,7 +355,12 @@
                     Update
                   {/if}
                 </Button>
-                <Button variant="outline" class="flex-1 h-8" onclick={cancelEdit} disabled={updating}>
+                <Button
+                  variant="outline"
+                  class="flex-1 h-8"
+                  onclick={cancelEdit}
+                  disabled={updating}
+                >
                   Cancel
                 </Button>
               </div>
@@ -311,7 +370,9 @@
               <div class="font-semibold text-sm">Upload Schema</div>
 
               <div class="space-y-2">
-                <Label for="workspace-name" class="text-xs">Workspace Name</Label>
+                <Label for="workspace-name" class="text-xs"
+                  >Workspace Name</Label
+                >
                 <Input
                   id="workspace-name"
                   type="text"
@@ -324,11 +385,15 @@
 
               <div class="space-y-2">
                 <Label for="schema-file" class="text-xs">File</Label>
-                <div class="text-xs text-muted-foreground truncate">{fileSelected?.name}</div>
+                <div class="text-xs text-muted-foreground truncate">
+                  {fileSelected?.name}
+                </div>
               </div>
 
               <div class="space-y-2">
-                <Label for="db-url" class="text-xs">Database URL (optional)</Label>
+                <Label for="db-url" class="text-xs"
+                  >Database URL (optional)</Label
+                >
                 <Input
                   id="db-url"
                   type="text"
@@ -344,7 +409,11 @@
               {/if}
 
               <div class="flex gap-2">
-                <Button class="flex-1 h-8" onclick={handleUpload} disabled={uploading || !fileSelected}>
+                <Button
+                  class="flex-1 h-8"
+                  onclick={handleUpload}
+                  disabled={uploading || !fileSelected}
+                >
                   {#if uploading}
                     <Loader class="h-3 w-3 mr-2 animate-spin" />
                     Creating...
@@ -352,7 +421,12 @@
                     Create
                   {/if}
                 </Button>
-                <Button variant="outline" class="flex-1 h-8" onclick={cancelUpload} disabled={uploading}>
+                <Button
+                  variant="outline"
+                  class="flex-1 h-8"
+                  onclick={cancelUpload}
+                  disabled={uploading}
+                >
                   Cancel
                 </Button>
               </div>
@@ -362,8 +436,9 @@
       </DropdownMenu.Root>
     </div>
   {:else}
-    <!-- Embedded Mode: Simple header without workspace management -->
-    <div class="h-[60px] shrink-0 bg-muted/50 border-b border-border px-4 flex items-center">
+    <div
+      class="h-[60px] shrink-0 bg-muted/50 border-b border-border px-4 flex items-center"
+    >
       <div class="flex items-center gap-2">
         <Database class="h-4 w-4 text-muted-foreground" />
         <span class="text-sm font-semibold">Schema Loaded</span>
@@ -371,8 +446,9 @@
     </div>
   {/if}
 
-  <!-- Operations Tabs - Always visible -->
-  <div class="h-[52px] shrink-0 flex items-center justify-between px-2 border-b border-border gap-2">
+  <div
+    class="h-[52px] shrink-0 flex items-center justify-between px-2 border-b border-border gap-2"
+  >
     <Tabs.Root
       value={selectedType || "read"}
       onValueChange={(v: string) => onSelectType(v as OperationType)}
@@ -385,7 +461,6 @@
     </Tabs.Root>
   </div>
 
-  <!-- Operations List - Always visible -->
   {#if selectedType}
     <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-2 pt-2">
       {#each Object.entries(groupedOperations) as [model, ops]}

@@ -2,32 +2,34 @@ import type { DMMFParser } from "../dmmf-parser.js";
 import { validateQueryState } from "../validate-query.js";
 import type { Payload, QueryState } from "../types.js";
 import { performance as perf } from "node:perf_hooks";
-import { sanitizeForLog, isPlainObject } from "$lib/helpers.js";
+import {
+  sanitizeForLog,
+  isPlainObject,
+  lowercaseFirst,
+  sanitizeResultForJson,
+  normalizePrismaPayload
+} from "$lib/helpers.js";
 
-
-type ExecuteResult = {
+export type ExecuteResult = {
   success: boolean;
   data?: unknown;
   error?: string;
   executionTime: number;
+  warnings?: string[];
 };
 
-const QUERY_TIMEOUT_MS = parseInt(process.env.QUERY_TIMEOUT ?? '30000');
+export type ExecuteOutput = {
+  result: ExecuteResult;
+  completion: Promise<void>;
+};
+
+const DEFAULT_QUERY_TIMEOUT_MS = 30000;
+const QUERY_TIMEOUT_MS = parseInt(
+  process.env.QUERY_TIMEOUT ?? String(DEFAULT_QUERY_TIMEOUT_MS)
+);
 
 function nowMs() {
-  return (globalThis.performance?.now?.() ?? perf.now());
-}
-
-async function executeWithTimeout<T>(
-  fn: () => Promise<T>,
-  timeoutMs: number
-): Promise<T> {
-  return Promise.race([
-    fn(),
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
-    )
-  ]);
+  return globalThis.performance?.now?.() ?? perf.now();
 }
 
 export async function executeQueryOperation(
@@ -35,100 +37,143 @@ export async function executeQueryOperation(
   parser: DMMFParser,
   model: string,
   method: string,
-  payload: Payload
-): Promise<ExecuteResult> {
+  payload: Payload,
+  timeoutMs?: number
+): Promise<ExecuteOutput> {
+  const resolvedTimeout = timeoutMs ?? QUERY_TIMEOUT_MS;
+
   const operations = parser.getOperations();
-  const operation = operations.find((op) => op.model === model && op.method === method);
+  const operation = operations.find(
+    (op) => op.model === model && op.method === method
+  );
 
   if (!operation) {
-    return { 
-      success: false, 
-      error: `Operation ${sanitizeForLog(model)}.${sanitizeForLog(method)} not found`, 
-      executionTime: 0 
+    return {
+      result: {
+        success: false,
+        error: `Operation ${sanitizeForLog(model)}.${sanitizeForLog(method)} not found`,
+        executionTime: 0
+      },
+      completion: Promise.resolve()
     };
   }
 
   const safePayload = isPlainObject(payload) ? payload : {};
-
-  const normalizedPayload = normalizePayloadForPrisma(safePayload);
+  const normalizedPayload = normalizePrismaPayload(safePayload);
 
   const queryState: QueryState = {
     operation,
     path: [],
-    payload: normalizedPayload as any,
+    payload: normalizedPayload as any
   };
 
   const validation = validateQueryState(parser, queryState);
+  const warnings: string[] = [];
   if (!validation.ok) {
-    return { success: false, error: validation.error, executionTime: 0 };
+    warnings.push(validation.error);
   }
 
-  const delegate = client?.[model];
-
-  console.log("[executeQuery] ModelName for client:", model);
+  const delegateName = lowercaseFirst(model);
+  const delegate = client?.[delegateName];
 
   if (!delegate) {
-    return { 
-      success: false, 
-      error: `Model "${sanitizeForLog(model)}" not found in Prisma client`, 
-      executionTime: 0 
+    return {
+      result: {
+        success: false,
+        error: `Model "${sanitizeForLog(model)}" not found in Prisma client`,
+        executionTime: 0
+      },
+      completion: Promise.resolve()
     };
   }
 
   const fn = delegate?.[method];
 
   if (typeof fn !== "function") {
-    return { 
-      success: false, 
-      error: `Method "${sanitizeForLog(method)}" not found on model "${sanitizeForLog(model)}"`, 
-      executionTime: 0 
+    return {
+      result: {
+        success: false,
+        error: `Method "${sanitizeForLog(method)}" not found on model "${sanitizeForLog(model)}"`,
+        executionTime: 0
+      },
+      completion: Promise.resolve()
     };
   }
 
   const start = nowMs();
+  const args =
+    Object.keys(normalizedPayload).length > 0 ? normalizedPayload : undefined;
+
+  let queryPromise: Promise<any>;
+  let completion: Promise<void>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    const args = Object.keys(normalizedPayload).length > 0 ? normalizedPayload : undefined;
-    
-    console.log("[executeQuery] Calling:", `${model}.${method}`, "with args:", JSON.stringify(args)?.substring(0, 200));
-
-    const result = await executeWithTimeout(
-      () => fn.call(delegate, args),
-      QUERY_TIMEOUT_MS
+    queryPromise = fn.call(delegate, args);
+    completion = queryPromise.then(
+      () => {},
+      () => {}
     );
-
-    const executionTime = nowMs() - start;
-    
-    console.log("[executeQuery] Success, rows:", Array.isArray(result) ? result.length : 'N/A');
-    
-    return { success: true, data: result, executionTime };
   } catch (error) {
     const executionTime = nowMs() - start;
-    
-    console.error("[executeQuery] Error:", error);
-    
-    if (error instanceof Error && error.message === 'Query timeout') {
-      return {
+    return {
+      result: {
         success: false,
-        error: `Query exceeded ${QUERY_TIMEOUT_MS / 1000}s timeout`,
-        executionTime
-      };
-    }
-    
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : String(error), 
-      executionTime 
+        error: error instanceof Error ? error.message : String(error),
+        executionTime,
+        warnings: warnings.length > 0 ? warnings : undefined
+      },
+      completion: Promise.resolve()
     };
   }
-}
 
-function normalizePayloadForPrisma(payload: Record<string, any>): Record<string, any> {
-  const normalized = { ...payload };
+  try {
+    const rawResult = await Promise.race([
+      queryPromise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Query timeout")),
+          resolvedTimeout
+        );
+      })
+    ]);
 
-  if ('distinct' in normalized && typeof normalized.distinct === 'string') {
-    normalized.distinct = [normalized.distinct];
+    clearTimeout(timer!);
+    const executionTime = nowMs() - start;
+
+    return {
+      result: {
+        success: true,
+        data: sanitizeResultForJson(rawResult),
+        executionTime,
+        warnings: warnings.length > 0 ? warnings : undefined
+      },
+      completion: Promise.resolve()
+    };
+  } catch (error) {
+    clearTimeout(timer!);
+    const executionTime = nowMs() - start;
+
+    if (error instanceof Error && error.message === "Query timeout") {
+      return {
+        result: {
+          success: false,
+          error: `Query exceeded ${resolvedTimeout / 1000}s timeout. The database query may still be running.`,
+          executionTime,
+          warnings: warnings.length > 0 ? warnings : undefined
+        },
+        completion
+      };
+    }
+
+    return {
+      result: {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        executionTime,
+        warnings: warnings.length > 0 ? warnings : undefined
+      },
+      completion: Promise.resolve()
+    };
   }
-
-  return normalized;
 }

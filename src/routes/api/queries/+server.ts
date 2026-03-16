@@ -2,7 +2,8 @@ import { json } from "@sveltejs/kit";
 import { isEmbeddedMode } from "$lib/embedded-mode.js";
 
 function persistenceDisabled(): boolean {
-  const envDisabled = String(process.env.DISABLE_PERSISTENCE || "").toLowerCase() === "true";
+  const envDisabled =
+    String(process.env.DISABLE_PERSISTENCE || "").toLowerCase() === "true";
   return envDisabled || isEmbeddedMode();
 }
 
@@ -22,7 +23,9 @@ export const GET = async ({ url }) => {
     return json({ queries: [] });
   }
 
-  const workspaceId = normalizeWorkspaceId(url.searchParams.get("workspaceId"));
+  const workspaceId = normalizeWorkspaceId(
+    url.searchParams.get("workspaceId")
+  );
 
   const { getQueriesDb } = await import("$lib/server/queries-db.js");
   const db = await getQueriesDb();
@@ -69,41 +72,41 @@ export const POST = async ({ request }) => {
       : null;
 
   if (!name || !model || !method) {
-    return json({ error: "name, model, method are required" }, { status: 400 });
+    return json(
+      { error: "name, model, method are required" },
+      { status: 400 }
+    );
   }
 
   try {
     JSON.parse(payload || "{}");
   } catch {
-    return json({ error: "payload must be valid JSON string" }, { status: 400 });
+    return json(
+      { error: "payload must be valid JSON string" },
+      { status: 400 }
+    );
   }
 
   const { getQueriesDb } = await import("$lib/server/queries-db.js");
   const db = await getQueriesDb();
 
-  const saved = await db.savedQuery.upsert({
-    where: {
-      workspaceId_name: {
-        workspaceId,
-        name
-      }
-    },
-    create: {
-      name,
-      description,
-      model,
-      method,
-      payload,
-      workspaceId
-    },
-    update: {
-      description,
-      model,
-      method,
-      payload
-    },
+  const existing = await db.savedQuery.findFirst({
+    where: { workspaceId, name },
     select: { id: true }
   });
 
-  return json(saved);
+  if (existing) {
+    await db.savedQuery.update({
+      where: { id: existing.id },
+      data: { description, model, method, payload }
+    });
+    return json({ id: existing.id });
+  }
+
+  const created = await db.savedQuery.create({
+    data: { name, description, model, method, payload, workspaceId },
+    select: { id: true }
+  });
+
+  return json(created);
 };

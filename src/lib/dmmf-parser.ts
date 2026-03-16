@@ -7,6 +7,7 @@ import type {
   Operation,
   OperationType
 } from "./types.ts";
+import { isObjectRef, pickObjectTypeName } from "./dmmf-utils.ts";
 
 function isReadAction(action: string): boolean {
   return (
@@ -41,26 +42,10 @@ function toInputTypeRefs(inputTypes: any): DmmfInputTypeRef[] {
 
 function typeLabelFromRefs(refs: DmmfInputTypeRef[]): string {
   const parts = uniqueBy(
-    refs
-      .filter((r) => r.type)
-      .map((r) => (r.isList ? `${r.type}[]` : r.type)),
+    refs.filter((r) => r.type).map((r) => (r.isList ? `${r.type}[]` : r.type)),
     (s) => s
   );
   return parts.length ? parts.join(" | ") : "unknown";
-}
-
-function isObjectRef(r: DmmfInputTypeRef): boolean {
-  const loc = (r.location ?? "").toLowerCase();
-  const kind = (r.kind ?? "").toLowerCase();
-  if (kind === "object") return true;
-  if (loc.includes("inputobject")) return true;
-  if (loc === "inputobjecttypes") return true;
-  return false;
-}
-
-function pickObjectTypeName(refs: DmmfInputTypeRef[]): string | null {
-  const obj = refs.find((r) => r.type && isObjectRef(r));
-  return obj?.type ?? null;
 }
 
 type InputTypeMap = Map<string, DMMF.InputType>;
@@ -82,7 +67,8 @@ function createParserState(dmmf: DMMFData): ParserState {
   if (!dmmf) throw new Error("DMMF data is required");
   if (!dmmf.schema) throw new Error("DMMF schema is required");
   if (!dmmf.mappings) throw new Error("DMMF mappings is required");
-  if (!dmmf.datamodel?.models) throw new Error("DMMF datamodel.models is required");
+  if (!dmmf.datamodel?.models)
+    throw new Error("DMMF datamodel.models is required");
 
   const inputTypeMap: InputTypeMap = new Map();
   const inputFieldsCache: InputFieldsCache = new Map();
@@ -98,7 +84,10 @@ function createParserState(dmmf: DMMFData): ParserState {
   const modelEnums = (dmmf.schema.enumTypes as any)?.model ?? [];
   for (const e of [...prismaEnums, ...modelEnums]) {
     if (e?.name && Array.isArray(e?.values)) {
-      enumMap.set(String(e.name), e.values.map((v: any) => String(v)));
+      enumMap.set(
+        String(e.name),
+        e.values.map((v: any) => String(v))
+      );
     }
   }
 
@@ -106,9 +95,14 @@ function createParserState(dmmf: DMMFData): ParserState {
   const queryFieldSet = new Set<string>();
   const mutationFieldSet = new Set<string>();
 
-  const prismaOutput = (dmmf.schema.outputObjectTypes as any)?.prisma ?? [];
-  const queryType = (prismaOutput as DMMF.OutputType[]).find((t) => t?.name === "Query");
-  const mutationType = (prismaOutput as DMMF.OutputType[]).find((t) => t?.name === "Mutation");
+  const prismaOutput =
+    (dmmf.schema.outputObjectTypes as any)?.prisma ?? [];
+  const queryType = (prismaOutput as DMMF.OutputType[]).find(
+    (t) => t?.name === "Query"
+  );
+  const mutationType = (prismaOutput as DMMF.OutputType[]).find(
+    (t) => t?.name === "Mutation"
+  );
 
   const queryFields = (queryType?.fields ?? []) as DMMF.SchemaField[];
   const mutationFields = (mutationType?.fields ?? []) as DMMF.SchemaField[];
@@ -140,16 +134,19 @@ function getEnumValues(state: ParserState, enumName: string): string[] {
   return state.enumMap.get(enumName) ?? [];
 }
 
-function generateSelectFields(state: ParserState, modelName: string): FieldDefinition[] {
+function generateSelectFields(
+  state: ParserState,
+  modelName: string
+): FieldDefinition[] {
   const model = state.dmmf.datamodel.models.find((m) => m.name === modelName);
   if (!model) return [];
 
   const fields: FieldDefinition[] = [];
 
   for (const field of model.fields) {
-    if (field.kind === 'object') {
+    if (field.kind === "object") {
       const relatedModelArgsType = `${modelName}$${field.name}Args`;
-      
+
       fields.push({
         name: field.name,
         type: `Boolean | ${relatedModelArgsType}`,
@@ -157,19 +154,34 @@ function generateSelectFields(state: ParserState, modelName: string): FieldDefin
         isList: field.isList,
         relationModel: field.type,
         inputTypes: [
-          { type: 'Boolean', isList: false, kind: 'scalar', location: 'scalar' },
-          { type: relatedModelArgsType, isList: false, kind: 'object', location: 'inputObjectTypes' }
+          {
+            type: "Boolean",
+            isList: false,
+            kind: "scalar",
+            location: "scalar"
+          },
+          {
+            type: relatedModelArgsType,
+            isList: false,
+            kind: "object",
+            location: "inputObjectTypes"
+          }
         ],
         objectTypeName: relatedModelArgsType
       });
     } else {
       fields.push({
         name: field.name,
-        type: 'Boolean',
+        type: "Boolean",
         isRelation: false,
         isList: false,
         inputTypes: [
-          { type: 'Boolean', isList: false, kind: 'scalar', location: 'scalar' }
+          {
+            type: "Boolean",
+            isList: false,
+            kind: "scalar",
+            location: "scalar"
+          }
         ],
         objectTypeName: null
       });
@@ -179,16 +191,19 @@ function generateSelectFields(state: ParserState, modelName: string): FieldDefin
   return fields;
 }
 
-function generateIncludeFields(state: ParserState, modelName: string): FieldDefinition[] {
+function generateIncludeFields(
+  state: ParserState,
+  modelName: string
+): FieldDefinition[] {
   const model = state.dmmf.datamodel.models.find((m) => m.name === modelName);
   if (!model) return [];
 
   const fields: FieldDefinition[] = [];
 
   for (const field of model.fields) {
-    if (field.kind === 'object') {
+    if (field.kind === "object") {
       const relatedModelArgsType = `${modelName}$${field.name}Args`;
-      
+
       fields.push({
         name: field.name,
         type: `Boolean | ${relatedModelArgsType}`,
@@ -196,8 +211,18 @@ function generateIncludeFields(state: ParserState, modelName: string): FieldDefi
         isList: field.isList,
         relationModel: field.type,
         inputTypes: [
-          { type: 'Boolean', isList: false, kind: 'scalar', location: 'scalar' },
-          { type: relatedModelArgsType, isList: false, kind: 'object', location: 'inputObjectTypes' }
+          {
+            type: "Boolean",
+            isList: false,
+            kind: "scalar",
+            location: "scalar"
+          },
+          {
+            type: relatedModelArgsType,
+            isList: false,
+            kind: "object",
+            location: "inputObjectTypes"
+          }
         ],
         objectTypeName: relatedModelArgsType
       });
@@ -207,52 +232,67 @@ function generateIncludeFields(state: ParserState, modelName: string): FieldDefi
   return fields;
 }
 
-function getInputTypeFields(state: ParserState, typeName: string): FieldDefinition[] {
+function getInputTypeFields(
+  state: ParserState,
+  typeName: string
+): FieldDefinition[] {
   const cached = state.inputFieldsCache.get(typeName);
   if (cached) return cached;
 
-  if (typeName.endsWith('Select')) {
-    const modelName = typeName.replace(/Select$/, '');
+  if (typeName.endsWith("Select")) {
+    const modelName = typeName.replace(/Select$/, "");
     const fields = generateSelectFields(state, modelName);
     state.inputFieldsCache.set(typeName, fields);
     return fields;
   }
 
-  if (typeName.endsWith('Include')) {
-    const modelName = typeName.replace(/Include$/, '');
+  if (typeName.endsWith("Include")) {
+    const modelName = typeName.replace(/Include$/, "");
     const fields = generateIncludeFields(state, modelName);
     state.inputFieldsCache.set(typeName, fields);
     return fields;
   }
 
-  if (typeName.includes('$') && typeName.endsWith('Args')) {
+  if (typeName.includes("$") && typeName.endsWith("Args")) {
     const match = typeName.match(/^(.+?)\$(.+?)Args$/);
     if (match) {
       const [, parentModel, relationField] = match;
-      const model = state.dmmf.datamodel.models.find((m) => m.name === parentModel);
+      const model = state.dmmf.datamodel.models.find(
+        (m) => m.name === parentModel
+      );
       const field = model?.fields.find((f) => f.name === relationField);
-      
-      if (field && field.kind === 'object') {
+
+      if (field && field.kind === "object") {
         const relatedSelectType = `${field.type}Select`;
         const relatedIncludeType = `${field.type}Include`;
         const relatedWhereType = `${field.type}WhereInput`;
-        
+
         const argsFields: FieldDefinition[] = [
           {
-            name: 'select',
+            name: "select",
             type: relatedSelectType,
             isRelation: false,
             inputTypes: [
-              { type: relatedSelectType, isList: false, kind: 'object', location: 'inputObjectTypes' }
+              {
+                type: relatedSelectType,
+                isList: false,
+                kind: "object",
+                location: "inputObjectTypes"
+              }
             ],
             objectTypeName: relatedSelectType
           },
           {
-            name: 'include',
+            name: "include",
             type: relatedIncludeType,
             isRelation: false,
             inputTypes: [
-              { type: relatedIncludeType, isList: false, kind: 'object', location: 'inputObjectTypes' }
+              {
+                type: relatedIncludeType,
+                isList: false,
+                kind: "object",
+                location: "inputObjectTypes"
+              }
             ],
             objectTypeName: relatedIncludeType
           }
@@ -261,38 +301,58 @@ function getInputTypeFields(state: ParserState, typeName: string): FieldDefiniti
         if (field.isList) {
           argsFields.push(
             {
-              name: 'where',
+              name: "where",
               type: relatedWhereType,
               isRelation: false,
               inputTypes: [
-                { type: relatedWhereType, isList: false, kind: 'object', location: 'inputObjectTypes' }
+                {
+                  type: relatedWhereType,
+                  isList: false,
+                  kind: "object",
+                  location: "inputObjectTypes"
+                }
               ],
               objectTypeName: relatedWhereType
             },
             {
-              name: 'orderBy',
+              name: "orderBy",
               type: `${field.type}OrderByWithRelationInput`,
               isRelation: false,
               inputTypes: [
-                { type: `${field.type}OrderByWithRelationInput`, isList: true, kind: 'object', location: 'inputObjectTypes' }
+                {
+                  type: `${field.type}OrderByWithRelationInput`,
+                  isList: true,
+                  kind: "object",
+                  location: "inputObjectTypes"
+                }
               ],
               objectTypeName: `${field.type}OrderByWithRelationInput`
             },
             {
-              name: 'take',
-              type: 'Int',
+              name: "take",
+              type: "Int",
               isRelation: false,
               inputTypes: [
-                { type: 'Int', isList: false, kind: 'scalar', location: 'scalar' }
+                {
+                  type: "Int",
+                  isList: false,
+                  kind: "scalar",
+                  location: "scalar"
+                }
               ],
               objectTypeName: null
             },
             {
-              name: 'skip',
-              type: 'Int',
+              name: "skip",
+              type: "Int",
               isRelation: false,
               inputTypes: [
-                { type: 'Int', isList: false, kind: 'scalar', location: 'scalar' }
+                {
+                  type: "Int",
+                  isList: false,
+                  kind: "scalar",
+                  location: "scalar"
+                }
               ],
               objectTypeName: null
             }
@@ -335,7 +395,10 @@ function getInputTypeFields(state: ParserState, typeName: string): FieldDefiniti
   return cleaned;
 }
 
-function getOperationArgsFromRootField(state: ParserState, rootFieldName: string): ArgDefinition[] {
+function getOperationArgsFromRootField(
+  state: ParserState,
+  rootFieldName: string
+): ArgDefinition[] {
   const field = state.rootFieldMap.get(rootFieldName);
 
   if (!field?.args) return [];
@@ -353,7 +416,9 @@ function getOperationArgsFromRootField(state: ParserState, rootFieldName: string
       isNullable: !Boolean(a?.isRequired),
       inputTypes: refs,
       objectTypeName,
-      fields: objectTypeName ? getInputTypeFields(state, objectTypeName) : undefined
+      fields: objectTypeName
+        ? getInputTypeFields(state, objectTypeName)
+        : undefined
     });
   }
 
@@ -362,18 +427,17 @@ function getOperationArgsFromRootField(state: ParserState, rootFieldName: string
 
 function shouldHaveSelectInclude(method: string): boolean {
   const methodsWithSelectInclude = [
-    'findUnique',
-    'findUniqueOrThrow',
-    'findFirst', 
-    'findFirstOrThrow',
-    'findMany',
-    'create',
-    'createMany',
-    'createManyAndReturn',
-    'update',
-    'updateMany',
-    'updateManyAndReturn',
-    'upsert'
+    "findUnique",
+    "findUniqueOrThrow",
+    "findFirst",
+    "findFirstOrThrow",
+    "findMany",
+    "create",
+    "createManyAndReturn",
+    "update",
+    "updateManyAndReturn",
+    "upsert",
+    "delete"
   ];
   return methodsWithSelectInclude.includes(method);
 }
@@ -387,31 +451,35 @@ function addSelectIncludeArgs(
   const includeTypeName = `${modelName}Include`;
 
   const selectArg: ArgDefinition = {
-    name: 'select',
+    name: "select",
     type: selectTypeName,
     isRequired: false,
     isNullable: true,
-    inputTypes: [{
-      type: selectTypeName,
-      isList: false,
-      kind: 'object',
-      location: 'inputObjectTypes'
-    }],
+    inputTypes: [
+      {
+        type: selectTypeName,
+        isList: false,
+        kind: "object",
+        location: "inputObjectTypes"
+      }
+    ],
     objectTypeName: selectTypeName,
     fields: generateSelectFields(state, modelName)
   };
 
   const includeArg: ArgDefinition = {
-    name: 'include',
+    name: "include",
     type: includeTypeName,
     isRequired: false,
     isNullable: true,
-    inputTypes: [{
-      type: includeTypeName,
-      isList: false,
-      kind: 'object',
-      location: 'inputObjectTypes'
-    }],
+    inputTypes: [
+      {
+        type: includeTypeName,
+        isList: false,
+        kind: "object",
+        location: "inputObjectTypes"
+      }
+    ],
     objectTypeName: includeTypeName,
     fields: generateIncludeFields(state, modelName)
   };
@@ -431,14 +499,13 @@ function getOperations(state: ParserState): Operation[] {
       if (clientMethod === "model" || clientMethod === "plural") continue;
       if (typeof rootFieldName !== "string" || !rootFieldName) continue;
 
-      const type: OperationType =
-        state.queryFieldSet.has(rootFieldName)
-          ? "read"
-          : state.mutationFieldSet.has(rootFieldName)
-            ? "write"
-            : isReadAction(clientMethod)
-              ? "read"
-              : "write";
+      const type: OperationType = state.queryFieldSet.has(rootFieldName)
+        ? "read"
+        : state.mutationFieldSet.has(rootFieldName)
+          ? "write"
+          : isReadAction(clientMethod)
+            ? "read"
+            : "write";
 
       let args = getOperationArgsFromRootField(state, rootFieldName);
 
@@ -469,7 +536,8 @@ export function createDMMFParser(dmmf: DMMFData) {
 
   return {
     getOperations: () => getOperations(state),
-    getInputTypeFields: (typeName: string) => getInputTypeFields(state, typeName),
+    getInputTypeFields: (typeName: string) =>
+      getInputTypeFields(state, typeName),
     getEnumValues: (enumName: string) => getEnumValues(state, enumName)
   };
 }
