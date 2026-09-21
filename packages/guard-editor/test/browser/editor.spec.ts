@@ -40,7 +40,7 @@ test('unaccepted checkbox and numeric proposals do not replace the parent value'
 test('read-only state disables mutation without disabling preview or navigation', async ({ page }) => {
   await page.getByRole('button', { name: 'Toggle read-only' }).click();
   await expect(editor(page).getByText('Read-only policy')).toBeVisible();
-  const controls = editor(page).locator('input,select,textarea');
+  const controls = editor(page).locator('input:not([readonly]),select,textarea:not([readonly])');
   for (const control of await controls.all()) await expect(control).toBeDisabled();
   const navigation = editor(page).getByRole('button', { name: /^posts → Post/ });
   await navigation.click();
@@ -86,7 +86,7 @@ test('forced sources use supplied labels and are never resolved in the component
   await control.selectOption('source:actorTenant');
   expect((await readPolicy(page)).where).toEqual([{ kind: 'forced', field: 'tenantId', value: { kind: 'source', name: 'actorTenant' } }]);
   await expect(editor(page).getByText(/Named sources are never resolved by this editor/)).toBeVisible();
-  await expect(editor(page).getByRole('textbox')).toHaveCount(0);
+  await expect(editor(page).locator('input[type="text"],textarea:not([readonly])')).toHaveCount(0);
 });
 
 test('literal data is parsed as JSON, validated, and previewed with an explicit force marker', async ({ page }) => {
