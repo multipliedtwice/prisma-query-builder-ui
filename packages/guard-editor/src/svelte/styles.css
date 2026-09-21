@@ -1,0 +1,68 @@
+.guard-shape-builder {
+  color: var(--foreground, #171717);
+  background: var(--background, #fff);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.guard-shape-builder *, .guard-shape-builder *::before, .guard-shape-builder *::after { box-sizing: border-box; min-width: 0; }
+.guard-shape-builder h2 { font-size: 1.25rem; line-height: 1.4; margin: 0; font-weight: 600; }
+.guard-shape-builder h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
+.guard-shape-builder p { margin: 0.5rem 0; }
+.guard-shape-builder .guard-header { margin-bottom: 1rem; }
+.guard-shape-builder .guard-hint { color: var(--muted-foreground, #525252); font-size: 0.875rem; }
+.guard-shape-builder .guard-status { display: inline-block; border: 1px solid var(--border, #dedede); border-radius: var(--radius, 0.625rem); padding: 0.375rem 0.75rem; }
+.guard-shape-builder .guard-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.guard-shape-builder .guard-controls, .guard-shape-builder .guard-previews { display: grid; gap: 1rem; }
+.guard-shape-builder fieldset { margin: 0; padding: 0.75rem; border: 1px solid var(--border, #dedede); border-radius: var(--radius, 0.625rem); }
+.guard-shape-builder legend { padding: 0 0.375rem; max-width: 100%; font-weight: 600; white-space: normal; }
+.guard-shape-builder .guard-field-group { margin-top: 0.75rem; }
+.guard-shape-builder .guard-choice { display: flex; align-items: center; gap: 0.625rem; min-height: 44px; padding: 0.375rem; border-radius: 0.375rem; cursor: pointer; }
+.guard-shape-builder .guard-choice:has(input:disabled) { cursor: default; }
+.guard-shape-builder .guard-choice:focus-within { outline: 2px solid var(--foreground, #171717); outline-offset: 2px; }
+.guard-shape-builder input[type="checkbox"] { width: 1.125rem; height: 1.125rem; flex: 0 0 auto; accent-color: var(--primary, #262626); }
+.guard-shape-builder .guard-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 0.125rem 0.75rem; }
+.guard-shape-builder input:not([type="checkbox"]), .guard-shape-builder select, .guard-shape-builder textarea {
+  width: 100%; max-width: 100%; min-height: 44px; padding: 0.625rem 0.75rem;
+  font: inherit; color: inherit; background: var(--background, #fff);
+  border: 1px solid var(--input, #a3a3a3); border-radius: 0.375rem;
+}
+.guard-shape-builder textarea { resize: vertical; white-space: pre-wrap; overflow-wrap: anywhere; }
+.guard-shape-builder label { overflow-wrap: anywhere; }
+.guard-shape-builder select { text-overflow: ellipsis; }
+.guard-shape-builder button {
+  min-height: 44px; max-width: 100%; padding: 0.625rem 0.875rem; font: inherit; font-weight: 500;
+  white-space: normal; overflow-wrap: anywhere; text-align: start;
+  color: var(--foreground, #171717); background: var(--secondary, #f5f5f5);
+  border: 1px solid var(--border, #dedede); border-radius: 0.375rem; cursor: pointer;
+}
+.guard-shape-builder button:hover:not(:disabled) { background: var(--accent, #e5e5e5); }
+.guard-shape-builder :disabled { opacity: 0.65; cursor: not-allowed; }
+.guard-shape-builder :is(button, select, textarea, input, pre):focus-visible { outline: 2px solid var(--foreground, #171717); outline-offset: 3px; }
+.guard-shape-builder .guard-rule-control { display: grid; gap: 0.5rem; }
+.guard-shape-builder .guard-rule-control p:empty, .guard-shape-builder .guard-error:empty, .guard-shape-builder .guard-change-error:empty { display: none; }
+.guard-shape-builder .guard-bounds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.guard-shape-builder .guard-bounds label { display: grid; gap: 0.375rem; }
+.guard-shape-builder .guard-bounds .guard-error { grid-column: 1 / -1; }
+.guard-shape-builder .guard-relation { margin-top: 0.75rem; }
+.guard-shape-builder .guard-relation-toggle { width: 100%; }
+.guard-shape-builder .guard-relation-body { padding: 0.5rem 0 0.5rem 0.625rem; border-left: 2px solid var(--border, #dedede); margin-top: 0.5rem; }
+.guard-shape-builder .guard-preview { border: 1px solid var(--border, #dedede); border-radius: var(--radius, 0.625rem); padding: 0.875rem; }
+.guard-shape-builder pre, .guard-shape-builder .guard-preview-code {
+  margin: 0; padding: 0.75rem; max-width: 100%; max-height: 36rem; overflow: auto;
+  font-size: 0.8125rem; line-height: 1.5; font-family: ui-monospace, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--muted, #f5f5f5); border-radius: 0.375rem;
+}
+.guard-shape-builder .guard-preview-code { width: 100%; min-height: 10rem; resize: vertical; border: 0; }
+.guard-shape-builder .guard-error, .guard-shape-builder .guard-change-error, .guard-shape-builder .guard-refusal { color: var(--destructive, #a51d24); }
+.guard-shape-builder .guard-refusal, .guard-shape-builder .guard-change-error:not(:empty) {
+  border: 1px solid currentColor; border-radius: var(--radius, 0.625rem); padding: 0.875rem; margin-bottom: 1rem;
+}
+.guard-shape-builder .guard-notice { border-left: 3px solid var(--border, #a3a3a3); padding-left: 0.75rem; }
+@media (min-width: 64rem) {
+  .guard-shape-builder .guard-layout { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}

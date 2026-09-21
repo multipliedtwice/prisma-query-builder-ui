@@ -1,0 +1,9 @@
+{
+  "name": "guard-editor-prisma-contracts",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "prisma-six-internals": "npm:@prisma/internals@6.19.3",
+    "prisma-seven-internals": "npm:@prisma/internals@7.3.0"
+  }
+}

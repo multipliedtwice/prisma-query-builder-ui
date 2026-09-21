@@ -1,0 +1,248 @@
+{
+  "datamodel": {
+    "enums": [
+      {
+        "name": "State",
+        "values": [
+          {
+            "name": "ACTIVE",
+            "dbName": null
+          },
+          {
+            "name": "INACTIVE",
+            "dbName": null
+          }
+        ],
+        "dbName": null
+      }
+    ],
+    "models": [
+      {
+        "name": "User",
+        "dbName": null,
+        "schema": null,
+        "fields": [
+          {
+            "name": "id",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": true,
+            "isReadOnly": false,
+            "hasDefaultValue": true,
+            "type": "Int",
+            "isGenerated": false,
+            "isUpdatedAt": false,
+            "default": {
+              "name": "autoincrement",
+              "args": []
+            }
+          },
+          {
+            "name": "email",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": true,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "displayName",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": false,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "state",
+            "kind": "enum",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": true,
+            "type": "State",
+            "isGenerated": false,
+            "isUpdatedAt": false,
+            "default": "ACTIVE"
+          },
+          {
+            "name": "tags",
+            "kind": "scalar",
+            "isList": true,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "updatedAt",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "DateTime",
+            "isGenerated": false,
+            "isUpdatedAt": true
+          },
+          {
+            "name": "posts",
+            "kind": "object",
+            "isList": true,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "Post",
+            "isGenerated": false,
+            "isUpdatedAt": false,
+            "relationName": "PostToUser",
+            "relationFromFields": [],
+            "relationToFields": []
+          }
+        ],
+        "primaryKey": null,
+        "uniqueFields": [],
+        "uniqueIndexes": [],
+        "isGenerated": false
+      },
+      {
+        "name": "Post",
+        "dbName": null,
+        "schema": null,
+        "fields": [
+          {
+            "name": "tenantId",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "slug",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "authorId",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": true,
+            "hasDefaultValue": false,
+            "type": "Int",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "title",
+            "kind": "scalar",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "String",
+            "isGenerated": false,
+            "isUpdatedAt": false
+          },
+          {
+            "name": "author",
+            "kind": "object",
+            "isList": false,
+            "isRequired": true,
+            "isUnique": false,
+            "isId": false,
+            "isReadOnly": false,
+            "hasDefaultValue": false,
+            "type": "User",
+            "isGenerated": false,
+            "isUpdatedAt": false,
+            "relationName": "PostToUser",
+            "relationFromFields": [
+              "authorId"
+            ],
+            "relationToFields": [
+              "id"
+            ]
+          }
+        ],
+        "primaryKey": {
+          "name": null,
+          "fields": [
+            "tenantId",
+            "slug"
+          ]
+        },
+        "uniqueFields": [
+          [
+            "authorId",
+            "slug"
+          ]
+        ],
+        "uniqueIndexes": [
+          {
+            "name": "authorSlug",
+            "fields": [
+              "authorId",
+              "slug"
+            ]
+          }
+        ],
+        "isGenerated": false
+      }
+    ],
+    "types": [],
+    "indexes": []
+  },
+  "schema": {
+    "inputObjectTypes": {},
+    "outputObjectTypes": {},
+    "enumTypes": {}
+  },
+  "mappings": {
+    "modelOperations": [],
+    "otherOperations": {
+      "read": [],
+      "write": []
+    }
+  }
+}

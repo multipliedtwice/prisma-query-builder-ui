@@ -824,3 +824,7 @@ MIT
 - Query optimization powered by [prisma-sql](https://github.com/teamdrive/prisma-sql)
 
 ---
+
+## Guard-policy editor preparation
+
+The separate private source package in [`packages/guard-editor`](packages/guard-editor/README.md) provides a browser-safe policy core, a Prisma 6/7 structural DMMF adapter and a controlled Svelte 5 `GuardShapeBuilder`. It does not execute queries or persist policy. Its public imports do not depend on this standalone playground or its database adapters. This addition does not change `QueryBuilder` or its existing exports. See the package README and Dee Wan's preparation report for the public API, conservative compiler subset and actual verification status.
