@@ -10,3 +10,7 @@ They cover enums, nullable scalars, lists, defaults, updated-at fields, foreign-
 `context.mjs` is an authored normalized descriptor/capability fixture. Its broad grants exercise the library; it is not a safe default capability preset for a product.
 
 The separately installed `../prisma-contract` package exercises actual Prisma 6.19.3 and 7.3.0 `getDMMF` implementations without generating clients or connecting to a database. Its engines do not enter the editor package or Dee Wan's dependency graph. Run it separately; fixture passes do not mean engine-backed checks ran.
+
+## Saved template examples
+
+`templates.ts` is typed against the actual extracted saved-query and query payload contracts. It uses the normalized User/Post descriptor from `context.mjs` and the redo assignment's recorded multi-usage pattern. It is not a capture of the unavailable external TalentProfile source or an invented API response. It includes separate same-operation profile/account and dashboard/search variants, an update, and two trusted route registrations explicitly sharing one query. The tests add concrete create/delete/findFirst cases, independent source constraints and named hook references.

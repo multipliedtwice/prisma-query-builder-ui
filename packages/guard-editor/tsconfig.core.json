@@ -1,9 +1,26 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
-    "strict": true, "exactOptionalPropertyTypes": true, "noImplicitOverride": true,
-    "declaration": true, "rootDir": "src", "outDir": "dist", "lib": ["ES2022"],
-    "types": [], "skipLibCheck": true, "verbatimModuleSyntax": true
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true
   },
-  "include": ["src/index.ts", "src/core/**/*.ts", "src/adapters/**/*.ts"]
+  "include": [
+    "src/index.ts",
+    "src/core/**/*.ts",
+    "src/adapters/**/*.ts",
+    "src/query/**/*.ts",
+    "src/templates/**/*.ts"
+  ]
 }

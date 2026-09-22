@@ -1,134 +1,91 @@
-# Guard editor preparation package
+# Saved Prisma query templates
 
-A controlled Svelte 5 guard-policy editor and a framework-independent policy core. This is a private source package, not a published release. The preparation report records which verification gates actually ran; source availability is not visual or production approval.
+This private source package adapts the original `prisma-query-builder-ui` editor for controlled embedding. Administrators author concrete Prisma query templates. A guard shape is derived internally; it is not another authoring format.
 
-The package lives at `packages/guard-editor` inside the `prisma-query-builder-ui` repository. It has **no production dependencies**. Svelte is an optional peer, needed only for the `/svelte` export. The standalone query playground and its Prisma 7 database adapters are not dependencies of this package.
+The product hierarchy is **model → operation → named usage/variant → query template**. Several queries can use the same model and operation without combining permissions. Several trusted routes may explicitly reference one query.
 
-## Public imports
+## One editor implementation
 
-Use the local package name `@prisma-query-builder/guard-editor` after building and linking this directory through the consumer's normal package manager. Importing the original `prisma-query-builder-ui` package is not required.
+`src/components/ArgTree.svelte`, `CodePreview.svelte`, and `QueryTabBar.svelte` in the original library are the shared implementation. Both the original `QueryTabs.svelte` playground and the new `SavedQueryWorkspace.svelte` compose `QueryEditor.svelte`, which uses those components directly. This is not a copy of their markup or a new policy form. The original CodeMirror preview remains an editable Prisma query representation; its execution control is present only when the standalone owner supplies an execution callback.
 
-| Subpath | Public contract |
+`QuerySchema` extracts the browser-safe structural portion of the original parser contract. `createQuerySchema` adapts a normalized descriptor to that contract. The standalone DMMF parser still supplies the same interface for its existing operations. Shared immutable payload/path helpers keep navigation and query edits consistent, including chained enum and array interactions.
+
+The controlled graph has no Prisma runtime, query execution, workspace database, original queries client, server routes, filesystem, environment, fetch, or storage dependency. UI peers are the original Svelte, shadcn/Bits UI, CodeMirror, and formatting dependencies. They are optional for headless consumers; no Prisma 7 adapter enters Dee Wan through this package.
+
+## Public entry points
+
+| Entry | Purpose |
 | --- | --- |
-| `.` or `/core` | Core types, schema/capability readers, policy reader/validator/parser/serializer, compiler and pure editor-state helpers |
-| `/types` | AST, descriptors, capabilities, operations, validation and resolver types |
-| `/schema` | `readSchema`, model/field lookup, compatible operators and ordering support |
-| `/dmmf` | `normalizeDmmf`, `DmmfDocumentLike` and structural DMMF adapter types |
-| `/validation` | `readPolicy`, `validatePolicy`, `parsePolicy`, `serializePolicy`, literal validation |
-| `/compiler` | `compilePolicy`, compiled shape/result types, `previewCompiledPolicy`, runtime force marker |
-| `/svelte` | `GuardShapeBuilder`, `GuardShapeBuilderProps` |
+| `/templates` | Saved-query readers, schema identity, inspection, deterministic derivation, trusted usage manifests, snapshot save helpers, schema adapter and public types. |
+| `/query` | Original structural query types, immutable payload/path utilities, safe literal parser, normalized query-schema adapter. |
+| `/svelte` | `SavedQueryWorkspace`, `ControlledQueryBuilder` (the shared original composition), and `SavedQueryWorkspaceProps`. |
+| `/schema`, `/dmmf` | Normalized descriptors and structural DMMF adapter. |
+| Root, `/core`, `/types`, `/validation`, `/compiler` | Retained headless validation/compiler compatibility exports. The old policy authoring components are removed. |
 
-`readPolicy` throws a structured refusal. `validatePolicy` returns `{ ok: true, value }` or `{ ok: false, issues }`. Every issue has a path, stable code and message. `parsePolicy` accepts JSON text and rejects duplicate object keys, including escaped duplicates. `serializePolicy` revalidates before canonical serialization. `canonicalJson` is a generic JSON utility, not a policy validator.
+The package is private and has no invented release version. The stage-based build includes shared source from its single canonical location and rewrites relative imports for emitted artifacts. It does not maintain a second editor source tree. The original standalone package uses the same staging helper and still requires its existing generated query-history client. The controlled package does not require that client.
 
-## Complete minimal core example
+## Saved query and owner contract
 
-```ts
-import { readSchema, readCapabilities, readPolicy, compilePolicy, serializePolicy } from '@prisma-query-builder/guard-editor/core';
+`SavedQueryTemplate` has `version: 1`, `id`, `name`, `model`, `operation`, `usageKey`, `payload`, `enabled`, `accepted`, and `schema: { id, revision }`. IDs and `(model, operation, usageKey)` must be unique. Changing stable identity requires duplication, not renaming. `name` is the editable display name.
 
-export const schema = readSchema({
-  version: 1,
-  models: [{
-    name: 'Article',
-    fields: [
-      { name: 'id', kind: 'scalar', type: 'Int', list: false, nullable: false, writable: true, hasDefault: true },
-      { name: 'title', kind: 'scalar', type: 'String', list: false, nullable: false, writable: true, hasDefault: false },
-    ],
-    uniqueSelectors: [{ name: 'id', fields: ['id'] }],
-  }],
-});
-export const capabilities = readCapabilities({
-  version: 1,
-  operations: ['findMany'],
-  models: [{
-    model: 'Article', select: ['id', 'title'],
-    where: [{ field: 'id', operators: ['equals'] }, { field: 'title', operators: ['in'] }],
-    unique: [], orderBy: ['id'], create: [], update: [], relations: [], forced: [],
-  }],
-  maxRelationDepth: 0,
-  pagination: { max: 100, allowSkip: true },
-  sources: [],
-}, schema);
-export const context = { schema, capabilities };
-export const initialPolicy = readPolicy({
-  version: 1, model: 'Article', operation: 'findMany', enabled: true,
-  select: [{ kind: 'field', field: 'id' }, { kind: 'field', field: 'title' }],
-  where: [{ kind: 'scalar', field: 'id', operators: ['equals'] }],
-  unique: [], orderBy: ['id'], data: [], skip: true,
-  take: { default: 25, max: 100 },
-}, context);
-export const policyJson = serializePolicy(initialPolicy, context);
-export const compiled = compilePolicy(initialPolicy, context);
-```
+`payload` is a concrete, JSON-serializable Prisma argument object. The code editor accepts object literals with unquoted keys, quoted strings, arrays, finite scalars, and trailing commas. It does not evaluate JavaScript. Functions, expressions, getters, duplicate keys, prototype keys, raw SQL, and changing the selected model/operation in code are refused.
 
-A consumer must treat `compiled.enabled === false` as a disabled operation. It must never turn that result into an absent or empty guard configuration on an enabled route. Enabled results contain `shape` and `requirements.enforceProjection: true`. Enforce that projection requirement in the consumer's prisma-guard configuration; merely passing `select` does not establish the mutation-return boundary.
+The component receives `context`, `model`, current `queries`, persisted `savedQueries`, explicit `bindings`, the server-registered `trustedRoutes` catalogue, `createId`, and `onchange`. The owner must supply the actual schema identity; a caller-supplied revision is not independently verified against a database by this package.
 
-## Controlled Svelte embedding
+`onchange` receives proposed complete saved-query values. Incomplete concrete drafts may be retained, but they cannot be accepted or generate a guard. Payload edits clear acceptance. Navigation does not. An owner can refuse an update by retaining its current props.
 
-With the preceding values in the consumer's `policy-fixture.ts`:
+Optional owner callbacks:
 
-```svelte
-<script lang="ts">
-  import { GuardShapeBuilder } from '@prisma-query-builder/guard-editor/svelte';
-  import { schema, capabilities, initialPolicy } from './policy-fixture.js';
-  let policy = $state(initialPolicy);
-</script>
+- `onSave(query): Promise<SavedQueryTemplate>` stores and acknowledges the exact detached snapshot. Update `savedQueries` after durable success and before resolving. An acknowledgment with changed metadata, identity, or payload is refused. Current edits are never replaced by an old completion.
+- `onDelete(savedQuery): Promise<void>` performs deletion after confirmation. Linked queries must first be explicitly unlinked. Reject on storage conflicts; do not silently delete a newer record.
+- `onLink(query, routeIds): Promise<UsageBinding[]>` persists explicit reuse against the trusted route catalogue and returns the validated complete binding list. The component does not create routes or infer their authority.
 
-<GuardShapeBuilder
-  {schema}
-  model="Article"
-  operation="findMany"
-  {policy}
-  {capabilities}
-  readOnly={false}
-  onChange={(next) => { policy = next; }}
-/>
-```
+Without a save callback, the workspace says storage is not connected. Dirty, saving, saved, failure, accepted, disabled, invalid, and stale states are distinct. Unsaved edits and invalid code remain associated with their own query when switching. Save all submits each dirty query separately. Deletion requires confirmation. Read-only permits navigation but disables changes.
 
-The consumer owns the value. The component does not mutate props, reset stale input, save anything, execute a query, resolve a named source or fetch a schema. Changing a valid control emits a complete newly validated value. The consumer may accept it by replacing the prop or retain the existing value. Numeric and JSON-literal controls may hold invalid draft text with an associated error, but no invalid policy is emitted. Matching model/operation changes remount only their transient editing controls; mismatched policy is refused.
+An enabled/accepted query with an old schema revision remains stale. Explicit review validates the payload against the new schema and is required before reacceptance; unknown fields are not removed automatically. Generation also validates the manifest revision, mappings, and referenced queries.
 
-Projection, unique selectors, filters/operators, writable fields, ordering, skip and bounds have labelled controls. Relation navigation is lazy, explicitly granted and bounded. Read-only mode disables mutation, not preview scrolling or relation navigation. The stylesheet reuses the standalone library's shadcn tokens without importing its application-level components or utility graph. It uses native inputs, fieldsets and buttons, scoped styles, visible focus and 44-pixel effective touch targets. The browser harness checks 390x844 and 1440x900; consult the report before treating those checks as executed.
+## Conservative derivation
 
-## JSON AST and refusal rules
+The current accepted operations are actual Prisma `findMany`, `findFirst`, `findUnique`, `create`, `update`, and `delete`. The synthetic `findManyPaginated` operation is not a saved Prisma template operation.
 
-Version 1 is one model and one operation per policy. All top-level keys are mandatory: `version`, `model`, `operation`, `enabled`, `select`, `where`, `unique`, `orderBy`, `data`, `skip`, `take`. Nonapplicable collections must be empty, `skip` must be false and `take` must be null. The initial operations are `findMany`, `findManyPaginated`, `findUnique`, `create`, `update` and `delete`.
+`deriveGuard(query, context, constraints?, resolver?)` validates before compiling and never mutates its inputs. The output identifies the query and usage and requires `enforceProjection: true` and trusted variant selection.
 
-Selections are scalar/enum leaves or explicit nested relation selections. Filters are scalar operator allowlists, forced equality predicates or bounded relation branches. Unique operations use complete named constraints, not filter operators; an allowed compound selector compiles to every constituent field. Client unique selectors cannot overlap a forced predicate. Create/update data is a scalar/enum client grant or a forced value; relation writes are never supported.
+| Template content | Derived artifact |
+| --- | --- |
+| `select` / `include` | Accepted structural projection, with bounded relation arguments. Omitted projection is resolved to the reviewed model's scalar fields. Relation `true` resolves to that relation's scalar projection. |
+| `where` | Only represented fields/operators. Ordinary example values become allowed typed leaves, not forced values. Complete unique selectors remain complete. |
+| `orderBy` | Only represented ordering fields and bounded to-one relation structure. |
+| `skip` | Allowed only when present. |
+| Positive `take` | The saved value is both initial default and maximum, bounded by the supplied maximum. |
+| Mutation `data` | Only represented writable fields and supported nested operations. Required create values must be supplied or explicitly server-constrained. |
 
-An enabled policy must select return fields. List operations require positive default/max pagination. Unique operations require at least one granted unique selector. Create/update require at least one data rule. Disabled policies may be empty but are still checked for unknown keys, stale fields and invalid retained rules.
+The supported nested mutation subset is one-level `connect` with complete unique selectors. To-one relations accept one selector, not an array. Nested create/update/delete/upsert, relation counts, cursor, distinct, aggregation/grouping, arbitrary JSON/Bytes filters, and incompatible/null operator values are refused. Homogeneous array shapes can be retained; heterogeneous shapes are refused rather than unioned. This is a conservative subset, not a claim to support every Prisma operation or connector.
 
-Capabilities separately grant operations, model exposure, projection, field/operator pairs, unique selectors, ordering, create/update data, forced targets and source identifiers. Relations require explicit grants plus a positive depth. Nothing is inferred from missing configuration. Limits are five relation levels, consumer-capped page sizes up to 10,000, JSON depth 64 and 20,000 JSON nodes. Input JSON text is limited to 262,144 UTF-16 code units; object input also bounds cumulative string/key size. Larger input refuses instead of being truncated.
+The supplied guard runtime adds String `mode` for some operators. When the query does not explicitly represent mode, derivation restricts this runtime-created option to `force('default')`; this constant is not inferred from an example scalar or identity field. Explicit represented mode remains an allowed enum leaf. Negative branches that cannot preserve this restriction in the supplied runtime are refused. String-filter behavior still needs connector-backed acceptance.
 
-Unsupported field kinds, reserved guard names (`AND`, `OR`, `NOT`, `_count`), unsafe object keys, duplicate entries, unknown versions/keys/operators, sparse arrays, functions, accessors, non-JSON prototypes and stale model/field/enum/constraint references refuse. Canonical output sorts object keys and permission collections by code-unit order. Literal arrays and compound selector field order retain their meaning. Unicode literal content is preserved; no locale-sensitive sorting is used.
+## Trusted constraints, hooks and routes
 
-## Forced values and compilation
+Ordinary literals such as a sample tenant identifier, `active: false`, or a user ID never establish server authority. `TrustedConstraint` is a separate server-owned input: a `where` or `data` field with either an explicit literal or a named source. Sources require an explicit typed resolver, whose returned value is validated. Missing or failed resolution refuses generation and does not expose the resolver's exception text.
 
-Literal nodes are `{ kind: 'literal', value: <JSON data> }`. Named nodes are `{ kind: 'source', name: <consumer identifier> }`. Capabilities separately grant literal use and each named source for each field and target. Named sources have consumer-provided labels; the control shows those labels and provides no expression editor. The JSON preview necessarily includes the stored identifier.
+Resolvers belong to the trusted server boundary, never the editor or client request. Contextual user/tenant values must be resolved for the current server request; do not reuse a resolved artifact across users or persist actor values as a general build artifact. Dynamic server integration is deliberately not invented here.
 
-Compiling an enabled named node requires a synchronous `SourceResolver`. It receives a frozen `{ source, model, field, target }` request and must return a JSON value compatible with that field. Missing resolvers, unknown sources, promises, invalid values and resolver failures refuse. Resolver errors do not expose the consumer exception text. Disabled results produce no shape and never call a resolver. JSON objects that happen to resemble source nodes remain ordinary data inside a literal.
+`UsageManifest` stores the schema identity and explicit route-to-query bindings, including model, operation, and usage key. `generateUsageManifest` also requires the trusted route catalogue, named hook registry, per-operation hooks, and per-query trusted extensions. It refuses duplicate, missing, unknown, mismatched, disabled, unaccepted, or stale mappings. Every active accepted query must have an explicit route mapping.
 
-The static compiler is data-only. It creates prisma-guard-compatible force wrappers using the supplied library's `Symbol.for('prisma-guard.forced')` marker, without importing its runtime. Parent contracts check that the actual supplied prisma-guard recognizes those wrappers. **Do not JSON-stringify and later reuse a compiled shape:** JSON loses runtime symbols. Store the validated policy AST, revalidate it against the current context and compile again at the trusted consumer boundary. The compiled preview uses `$force` as a labelled display convention, not as an executable policy format.
+Each usage derives its own shape. No model-wide or operation-wide union is constructed. Operation and variant hooks remain named references outside the query; before hooks run in operation/variant order and after hooks in variant/operation order when a future trusted runtime invokes them. This package does not execute hooks. The output declares `variantSelection: 'trusted-server-route-only'`; route identities are server configuration, not client headers or body fields.
 
-Supported forced literals include finite numbers, int32 integers, strings, booleans, declared enums, non-null JSON data and compatible arrays. BigInt is a signed 64-bit decimal string. Decimal accepts a JSON number or decimal string. DateTime is an exact UTC ISO timestamp with milliseconds. Nullable non-JSON scalar fields accept null. Bytes forced values and ambiguous top-level JSON null/database-null sentinels are outside this subset.
+The example fixtures reproduce the recorded multi-usage pattern, not the unavailable external TalentProfile application's exact data or routes.
 
-### Conservative boundaries inherited from the supplied guard
+## Dee Wan shell and preview
 
-The supplied guard implicitly exposes `mode` for String `equals`, `contains`, `startsWith` and `endsWith`. This compiler forces `mode: 'default'` so these operators do not silently grant client-selectable case mode. Consumers must verify that their connector accepts that mode before exposing these operators. DMMF-version compatibility is not database-connector acceptance; the adapter intentionally does not infer a connector from absent metadata.
+`ModelQueryWorkspace.svelte` is the selected-model page-content host. The frontend shell preview renders it inside Dee Wan's existing `WorkspaceLayout`, actual Sidebar, theme, site switcher, breadcrumbs, and identity area. The real authenticated application layout already uses that same frame; no replacement shell was introduced.
 
-Negative relation operators (`none`, `isNot`) refuse any explicit forced descendant and any string operator that would introduce that forced mode. This prevents the supplied guard's mixed forced/client negative-branch refusal. Positive relation branches remain bounded and explicit.
+The preview has a visible browser-storage disclosure, realistic named templates, and actual save/reload/rename/duplicate/delete/reuse flows. Its owner persists templates and manifest to localStorage, refuses malformed records and detectable cross-tab conflicts, and does not pretend to be a production CMS API. Test-only failure injection is in browser assertions; no validation toggle or fixture-control button appears in the workspace.
 
-Recursive `not`, logical combinators, full-text search, JSON path operators, arbitrary case modes, aggregation, relation ordering, relation-write payloads and raw expressions are outside version 1. `not: true` would expand nested permissions in the supplied guard, so it is not treated as a harmless scalar flag. For mutation relation projections, the caller may need to provide explicit bounded nested selections rather than rely on inferred defaults under `enforceProjection`; consumer runtime acceptance must exercise that contract.
+Production model-builder persistence, authoritative generated schema lookup/revision, route registration, runtime hook execution and generated-backend activation are not wired by this package. Those require their canonical owner contracts; the focused parent spike records proposed specification changes.
 
-## Prisma 6 / 7 adapter
+## Verification commands
 
-`normalizeDmmf(document)` reads the data-only `datamodel` subtree, not query mappings, query execution or generated clients. The structural input type accepts the relevant readonly shapes in Prisma 6.19.3 and 7.3.0. Irrelevant DMMF metadata is intentionally not part of the normalized descriptor; new relevant field kinds/types fail closed.
-
-The descriptor preserves enum values, nullability, list/relation cardinality, defaults, compound constraint order and names. Generated and updated-at scalars are not writable. DMMF `isReadOnly` on a foreign-key scalar is not an authorization rule: explicit scalar-write capabilities may expose that scalar without enabling nested writes. The adapter does not automatically grant any capability.
-
-The authored version fixtures and their provenance are documented in `test/fixtures/README.md`. Actual engine-backed contracts live in a separately installed `test/prisma-contract` package; they do not add either Prisma engine to this package or to Dee Wan's workspace.
-
-## Focused verification commands
-
-Use the parent's declared Node 24/npm 11 toolchain where available. Inspect CPU, memory, disk and competing runs before each check. From this package directory, with dependencies already installed:
+From this directory, use the declared toolchain and installed dependencies:
 
 ```sh
 npm run build:core
@@ -137,13 +94,10 @@ npm test
 npm run build
 npm run check:exports
 npm run test:browser
+npm run test:shell
 npm run test:prisma
 ```
 
-`test:prisma` additionally needs the isolated contract package's declared dependencies. No database, generated client or external service is used by those contracts. Do not run the parent verified installer for a source-only snapshot with no lockfiles. A temporary dependency installation, when authorized, must use `--ignore-scripts --package-lock=false` and must not enter the returned source archive.
+Parent checks remain `npm run guard-editor:check` and `npm run guard-editor:test`. Frontend acceptance requires `npm --prefix frontend run check` and `npm --prefix frontend run build`. The focused browser configurations use 390×844 and 1440×900 and the actual component and application layout. No full Cypress run is required.
 
-For headless-only export validation, `node scripts/check-exports.mjs --core-only` explicitly excludes the Svelte build gate. It is not a full-package pass. From Dee Wan's root, `npm run guard-editor:check` checks the component and the isolated parent TypeScript consumer; `npm run guard-editor:test` runs the parent marker, operation-key and import-boundary contracts after the core build.
-
-The transitive source-graph check follows every public export, relative imports, re-exports, type imports, Svelte scripts and CSS. Only Svelte itself is an allowed external public import. Server/execution/workspace/database paths, Prisma/Node imports, dynamic module loading, environment access and persistence/network APIs refuse. The scanner's own adversarial fixtures exercise those refusals.
-
-The Playwright harness mounts this component only, not Dee Wan. It checks callbacks, held props, read-only state, refusal, sources/literals, keyboard focus, error association, touch targets, overflow and absence of network/storage effects. It writes disposable screenshots for inspection. Dee Wan Cypress and Chrome acceptance apply only after a later authorized integration task.
+A syntax-only compiler pass does not establish Svelte type checking, package emission, rendered behavior, or layout approval. `FINAL-REPORT.md` records what ran and what was blocked in the implementation environment.

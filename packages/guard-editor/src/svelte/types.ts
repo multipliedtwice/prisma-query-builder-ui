@@ -1,12 +1,16 @@
-import type { Capabilities, ForcedValue, GuardPolicy, Operation, SchemaDescriptor } from '../core/types.js';
-
-export interface GuardShapeBuilderProps {
-  schema: SchemaDescriptor;
+import type { SavedQueryTemplate, TemplateContext, TrustedRoute, UsageBinding } from '../templates/types.js';
+export interface SavedQueryWorkspaceProps {
+  context: TemplateContext;
   model: string;
-  operation: Operation;
-  policy: unknown;
-  capabilities: Capabilities;
+  queries: SavedQueryTemplate[];
+  savedQueries: SavedQueryTemplate[];
+  bindings: UsageBinding[];
+  trustedRoutes: TrustedRoute[];
+  createId: () => string;
+  onchange: (queries: SavedQueryTemplate[]) => void;
+  onSave?: ((query: SavedQueryTemplate) => Promise<SavedQueryTemplate>) | undefined;
+  onDelete?: ((query: SavedQueryTemplate) => Promise<void>) | undefined;
+  onLink?: ((query: SavedQueryTemplate, routes: string[]) => Promise<UsageBinding[]>) | undefined;
   readOnly?: boolean;
-  onChange: (policy: GuardPolicy) => void;
+  onDirtyChange?: ((dirty: boolean) => void) | undefined;
 }
-export type RuleChoice = { kind: 'client' } | { kind: 'forced'; value: ForcedValue } | null;

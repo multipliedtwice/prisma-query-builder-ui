@@ -1,7 +1,7 @@
 import type { ForcedValue, GuardPolicy, JsonValue, Operation, Pagination, PolicyContext, Selection, SourceResolver, SourceRequest, WhereRule } from './types.js';
 import { canonicalJson, refuse } from './json.js';
 import { isUnique, readPolicy, validateLiteral } from './policy.js';
-import { fieldFor, modelFor, readSchema, valueField } from './schema.js';
+import { fieldFor, modelFor, readSchema, valueField, usesForcedStringMode } from './schema.js';
 
 export const FORCED_MARKER = Symbol.for('prisma-guard.forced');
 export interface ForcedGuardValue { value: JsonValue; [FORCED_MARKER]: true }
@@ -56,7 +56,7 @@ export function compilePolicy(input: unknown, context: PolicyContext, resolver?:
         const operators: WhereShape = rule.kind === 'forced'
           ? { equals: resolve(rule.value, { model: modelName, field: rule.field, target: 'where' }) }
           : Object.fromEntries(rule.operators.map(operator => [operator, true]));
-        if (field.kind === 'scalar' && field.type === 'String' && !field.list && ['equals', 'contains', 'startsWith', 'endsWith'].some(operator => Object.hasOwn(operators, operator))) {
+        if (usesForcedStringMode(field, Object.keys(operators))) {
           operators.mode = force('default');
         }
         result[rule.field] = operators;

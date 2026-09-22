@@ -1,20 +1,24 @@
 <script lang="ts">
-  import { generateCode } from "../lib/code-generator.ts";
-  import { parseLooseJson } from "../lib/helpers.ts";
-  import type { QueryState, Payload } from "../lib/types.ts";
-  import { onMount } from "svelte";
+  import { generateCode } from "../lib/code-generator.js";
+  import { parsePrismaQuery } from "../../packages/guard-editor/src/query/parse-code.js";
+  import type { QueryState, Payload } from "../../packages/guard-editor/src/query/types.js";
+  import { onMount, untrack } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { EditorState } from "@codemirror/state";
   import { javascript } from "@codemirror/lang-javascript";
   import { oneDark } from "@codemirror/theme-one-dark";
   import { Wand, Copy, Play, Check } from "@lucide/svelte";
-  import Button from "$lib/components/ui/button/button.svelte";
-  import { Switch } from "$lib/components/ui/switch/index.js";
-  import { Label } from "$lib/components/ui/label/index.js";
+  import Button from "../lib/components/ui/button/button.svelte";
+  import { Switch } from "../lib/components/ui/switch/index.js";
+  import { Label } from "../lib/components/ui/label/index.js";
 
   let {
     queryState,
     onrun,
+    readOnly = false,
+    draft = null,
+    ondraftchange,
+    onvaliditychange,
     oneditpayload,
     usePrismaSql = $bindable(false),
     hasWorkspace = false,
@@ -22,7 +26,11 @@
     embeddedHasDatabase = false,
   }: {
     queryState: QueryState;
-    onrun: () => void;
+    onrun?: (() => void) | undefined;
+    readOnly?: boolean;
+    draft?: string | null;
+    ondraftchange?: ((code: string | null) => void) | undefined;
+    onvaliditychange?: ((valid: boolean) => void) | undefined;
     oneditpayload: (payload: Payload) => void;
     usePrismaSql?: boolean;
     hasWorkspace?: boolean;
@@ -34,10 +42,11 @@
   let copyStatus = $state<CopyStatus>("idle");
   let parseError = $state<string | null>(null);
   let editorHasFocus = $state(false);
-  let applyGeneration = $state(0);
+  let applyGeneration = 0;
+  let disposed = false;
 
   let generatedCode = $derived(generateCode(queryState) || "");
-  let canRun = $derived(queryState.operation !== null);
+  let canRun = $derived(queryState.operation !== null && !parseError && !readOnly);
 
   let editorContainer: HTMLDivElement | null = $state(null);
   let editorView: EditorView | null = $state(null);
@@ -50,30 +59,6 @@
 
   function getIsDark(): boolean {
     return document.documentElement.classList.contains("dark");
-  }
-
-  function extractPayloadFromCode(code: string): string | null {
-    const openParen = code.indexOf("(");
-    if (openParen === -1) return null;
-
-    let depth = 0;
-    let closeParen = -1;
-    for (let i = openParen; i < code.length; i++) {
-      if (code[i] === "(") depth++;
-      else if (code[i] === ")") {
-        depth--;
-        if (depth === 0) {
-          closeParen = i;
-          break;
-        }
-      }
-    }
-
-    if (closeParen === -1) return null;
-
-    const inner = code.slice(openParen + 1, closeParen).trim();
-    if (!inner) return null;
-    return inner;
   }
 
   function updateEditorContent(content: string) {
@@ -90,30 +75,18 @@
     editorView.dispatch(transaction);
   }
 
-  function applyEditorContent() {
-    const gen = applyGeneration;
-    const code = editorView?.state.doc.toString() || "";
-    const payloadStr = extractPayloadFromCode(code);
-
-    if (payloadStr === null) {
-      if (gen !== applyGeneration) return;
-      parseError = null;
-      oneditpayload({});
-      return;
-    }
-
+  function applyEditorContent(): boolean {
+    if (readOnly) return false;
     try {
-      const parsed = parseLooseJson(payloadStr);
-      if (gen !== applyGeneration) return;
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        parseError = "Payload must be an object";
-        return;
-      }
+      const parsed = parsePrismaQuery(editorView?.state.doc.toString() ?? draft ?? generatedCode, queryState.operation);
       parseError = null;
-      oneditpayload(parsed as Payload);
-    } catch (e) {
-      if (gen !== applyGeneration) return;
-      parseError = e instanceof Error ? e.message : "Invalid payload";
+      onvaliditychange?.(true);
+      oneditpayload(parsed);
+      return true;
+    } catch (error) {
+      parseError = error instanceof Error ? error.message : 'Invalid query arguments';
+      onvaliditychange?.(false);
+      return false;
     }
   }
 
@@ -130,20 +103,24 @@
           lineHeight: "1.6",
         },
         ".cm-content": {
-          caretColor: "hsl(var(--foreground))",
+          caretColor: "var(--foreground)",
         },
         ".cm-cursor": {
-          borderLeftColor: "hsl(var(--foreground))",
+          borderLeftColor: "var(--foreground)",
         },
         ".cm-selectionBackground": {
-          backgroundColor: "hsl(var(--accent))",
+          backgroundColor: "var(--accent)",
+        },
+        "&.cm-focused": {
+          outline: "2px solid var(--ring)",
+          outlineOffset: "-2px",
         },
         "&.cm-focused .cm-selectionBackground": {
-          backgroundColor: "hsl(var(--accent))",
+          backgroundColor: "var(--accent)",
         },
         ".cm-gutters": {
           backgroundColor: "transparent",
-          color: "hsl(var(--muted-foreground))",
+          color: "var(--muted-foreground)",
           border: "none",
         },
       },
@@ -160,23 +137,17 @@
 
     const extensions = [
       basicSetup,
+      EditorState.readOnly.of(readOnly),
+      EditorView.editable.of(!readOnly),
+      EditorView.contentAttributes.of({ "aria-label": "Prisma query", "aria-multiline": "true", "role": "textbox" }),
+      EditorView.lineWrapping,
       javascript({ typescript: true }),
       createEditorTheme(),
-      EditorView.lineWrapping,
       EditorView.updateListener.of((update) => {
-        if (update.focusChanged) {
-          editorHasFocus = update.view.hasFocus;
-          if (!update.view.hasFocus) {
-            applyGeneration++;
-            if (debounceTimer) {
-              clearTimeout(debounceTimer);
-              debounceTimer = null;
-            }
-            updateEditorContent(generatedCode);
-            parseError = null;
-          }
-        }
-        if (update.docChanged && update.view.hasFocus) {
+        if (update.focusChanged) editorHasFocus = update.view.hasFocus;
+        if (update.docChanged && update.view.hasFocus && !readOnly) {
+          ondraftchange?.(update.state.doc.toString());
+          onvaliditychange?.(false);
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             applyEditorContent();
@@ -203,7 +174,8 @@
   onMount(() => {
     isDark = getIsDark();
     if (editorContainer) {
-      createEditor(generatedCode);
+      createEditor(draft ?? generatedCode);
+      if (draft !== null) applyEditorContent();
     }
 
     const observer = new MutationObserver((mutations) => {
@@ -227,6 +199,7 @@
     });
 
     return () => {
+      disposed = true; applyGeneration++;
       if (debounceTimer) clearTimeout(debounceTimer);
       if (editorView) {
         editorView.destroy();
@@ -237,11 +210,14 @@
   });
 
   $effect(() => {
-    generatedCode;
-    if (editorView && !editorHasFocus) {
-      updateEditorContent(generatedCode);
-      parseError = null;
-    }
+    const code = draft ?? generatedCode;
+    if (editorView && !editorHasFocus) updateEditorContent(code);
+    if (draft === null) { parseError = null; untrack(() => onvaliditychange?.(true)); }
+  });
+
+  $effect(() => {
+    const immutable = readOnly;
+    if (editorView && editorView.state.readOnly !== immutable) createEditor(editorView.state.doc.toString());
   });
 
   async function copyToClipboard() {
@@ -266,6 +242,7 @@
   }
 
   async function formatQuery() {
+    const generation = ++applyGeneration;
     const text = editorView?.state.doc.toString() || "";
     if (!text.trim()) return;
 
@@ -284,29 +261,16 @@
         tabWidth: 2,
       });
 
+      if (disposed || readOnly || generation !== applyGeneration || editorView?.state.doc.toString() !== text) return;
       updateEditorContent(formatted.trimEnd());
+      ondraftchange?.(formatted.trimEnd());
+      applyEditorContent();
     } catch {}
   }
 
   function handleRun() {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
-    }
-    const code = editorView?.state.doc.toString() || "";
-    const payloadStr = extractPayloadFromCode(code);
-    if (payloadStr !== null) {
-      try {
-        const parsed = parseLooseJson(payloadStr);
-        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-          parseError = null;
-          oneditpayload(parsed as Payload);
-        }
-      } catch {}
-    } else {
-      oneditpayload({});
-    }
-    onrun();
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    if (applyEditorContent()) onrun?.();
   }
 
   let copyAria = $derived(
@@ -320,11 +284,11 @@
   );
 </script>
 
-<div class="@container flex flex-col bg-muted/30 h-full">
+<div class="@container flex flex-col bg-muted/30 h-full min-w-0">
   <div
-    class="h-[52px] shrink-0 flex items-center justify-between px-4 border-b border-border"
+    class="query-code-header h-[52px] shrink-0 flex items-center justify-between px-4 border-b border-border"
   >
-    <div class="flex items-center gap-2">
+    <div class="query-code-title flex items-center gap-2">
       <h3 class="text-sm font-semibold">Prisma Query</h3>
     </div>
 
@@ -332,7 +296,8 @@
       <Button
         size="icon"
         variant="ghost"
-        class="h-8 w-8"
+        class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
+        disabled={readOnly}
         onclick={formatQuery}
         aria-label="Format"
         title="Format"
@@ -343,7 +308,7 @@
       <Button
         size="icon"
         variant="ghost"
-        class="h-8 w-8"
+        class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
         onclick={copyToClipboard}
         disabled={copyStatus === "copying"}
         aria-label={copyAria}
@@ -356,10 +321,11 @@
         {/if}
       </Button>
 
+      {#if onrun}
       <Button
         size="icon"
         variant="default"
-        class="h-8 w-8"
+        class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
         onclick={handleRun}
         disabled={!canRun}
         aria-label="Run"
@@ -367,7 +333,9 @@
         <Play class="h-4 w-4" />
       </Button>
 
-      {#if showPrismaSqlToggle}
+      {/if}
+
+      {#if onrun && showPrismaSqlToggle}
         <div class="flex items-center gap-2 px-2 py-1">
           <Switch
             id="prisma-sql-toggle"
@@ -398,7 +366,7 @@
       <div
         class="absolute bottom-5 left-5 right-5 bg-destructive/10 border border-destructive rounded px-3 py-2"
       >
-        <p class="text-xs text-destructive">{parseError}</p>
+        <p role="alert" class="text-xs text-destructive">{parseError}</p>
       </div>
     {/if}
   </div>

@@ -2,32 +2,123 @@
   "name": "@prisma-query-builder/guard-editor",
   "private": true,
   "type": "module",
-  "description": "Controlled guard-policy editing and a browser-safe policy core",
+  "description": "Controlled Prisma query-template authoring with deterministic guard derivation",
   "license": "MIT",
-  "files": ["dist", "README.md"],
-  "sideEffects": ["**/*.css", "**/*.svelte"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": [
+    "**/*.css",
+    "**/*.svelte"
+  ],
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
-    "./types": { "types": "./dist/core/types.d.ts", "import": "./dist/core/types.js" },
-    "./schema": { "types": "./dist/core/schema.d.ts", "import": "./dist/core/schema.js" },
-    "./dmmf": { "types": "./dist/adapters/dmmf.d.ts", "import": "./dist/adapters/dmmf.js" },
-    "./validation": { "types": "./dist/core/policy.d.ts", "import": "./dist/core/policy.js" },
-    "./compiler": { "types": "./dist/core/compiler.d.ts", "import": "./dist/core/compiler.js" },
-    "./svelte": { "types": "./dist/svelte/index.d.ts", "svelte": "./dist/svelte/index.js", "import": "./dist/svelte/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./types": {
+      "types": "./dist/core/types.d.ts",
+      "import": "./dist/core/types.js"
+    },
+    "./schema": {
+      "types": "./dist/core/schema.d.ts",
+      "import": "./dist/core/schema.js"
+    },
+    "./dmmf": {
+      "types": "./dist/adapters/dmmf.d.ts",
+      "import": "./dist/adapters/dmmf.js"
+    },
+    "./validation": {
+      "types": "./dist/core/policy.d.ts",
+      "import": "./dist/core/policy.js"
+    },
+    "./compiler": {
+      "types": "./dist/core/compiler.d.ts",
+      "import": "./dist/core/compiler.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte/index.d.ts",
+      "svelte": "./dist/svelte/index.js",
+      "import": "./dist/svelte/index.js"
+    },
+    "./templates": {
+      "types": "./dist/templates/index.d.ts",
+      "import": "./dist/templates/index.js"
+    },
+    "./query": {
+      "types": "./dist/query/index.d.ts",
+      "import": "./dist/query/index.js"
+    }
   },
   "scripts": {
     "build:core": "tsc -p tsconfig.core.json",
-    "build": "svelte-package -i src -o dist",
+    "build": "node scripts/build-package.mjs",
     "check:core": "tsc -p tsconfig.core.json --noEmit",
-    "check": "npm run check:core && svelte-check --tsconfig ./tsconfig.json",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "npm run check:core && node scripts/check-source.mjs && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.mjs",
     "test:browser": "playwright test --config playwright.config.ts",
     "check:exports": "node scripts/check-exports.mjs",
-    "test:prisma": "node --test --test-concurrency=1 test/prisma-contract/generate.test.mjs"
+    "test:prisma": "node --test --test-concurrency=1 test/prisma-contract/generate.test.mjs",
+    "test:shell": "playwright test --config playwright.shell.config.ts",
+    "check:source": "node scripts/check-source.mjs"
   },
-  "peerDependencies": { "svelte": "^5.20.0" },
-  "peerDependenciesMeta": { "svelte": { "optional": true } },
+  "peerDependencies": {
+    "svelte": "^5.20.0",
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.39.11",
+    "codemirror": "^6.0.2",
+    "prettier": "^3.8.1",
+    "@lucide/svelte": "^0.562.0",
+    "bits-ui": "^2.15.4",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.4.0",
+    "tailwind-variants": "^3.2.2"
+  },
+  "peerDependenciesMeta": {
+    "svelte": {
+      "optional": true
+    },
+    "@codemirror/lang-javascript": {
+      "optional": true
+    },
+    "@codemirror/state": {
+      "optional": true
+    },
+    "@codemirror/theme-one-dark": {
+      "optional": true
+    },
+    "@codemirror/view": {
+      "optional": true
+    },
+    "codemirror": {
+      "optional": true
+    },
+    "prettier": {
+      "optional": true
+    },
+    "@lucide/svelte": {
+      "optional": true
+    },
+    "bits-ui": {
+      "optional": true
+    },
+    "clsx": {
+      "optional": true
+    },
+    "tailwind-merge": {
+      "optional": true
+    },
+    "tailwind-variants": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
     "@sveltejs/package": "^2.5.7",
@@ -35,7 +126,23 @@
     "svelte": "^5.48.2",
     "svelte-check": "^4.3.5",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.39.11",
+    "codemirror": "^6.0.2",
+    "prettier": "^3.8.1",
+    "@lucide/svelte": "^0.562.0",
+    "bits-ui": "^2.15.4",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.4.0",
+    "tailwind-variants": "^3.2.2",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "tw-animate-css": "^1.3.7"
   },
-  "engines": { "node": "^22.14.0 || ^24.10.0" }
+  "engines": {
+    "node": "^22.14.0 || ^24.10.0"
+  }
 }

@@ -1,4 +1,4 @@
-import type { Capabilities, GuardPolicy, Operation, PolicyContext, SchemaDescriptor } from '../../dist/core/types.js';
+import type { Capabilities, GuardPolicy, Operation, PolicyContext, SchemaDescriptor } from '../../src/core/types.js';
 export const schema: SchemaDescriptor;
 export const capabilities: Capabilities;
 export const context: PolicyContext;

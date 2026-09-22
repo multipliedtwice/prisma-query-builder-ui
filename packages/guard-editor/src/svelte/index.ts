@@ -1,2 +1,4 @@
-export { default as GuardShapeBuilder } from './GuardShapeBuilder.svelte';
-export type { GuardShapeBuilderProps } from './types.js';
+export { default as SavedQueryWorkspace } from './SavedQueryWorkspace.svelte';
+export { default as ControlledQueryBuilder } from '../../../../src/components/QueryEditor.svelte';
+export type { SavedQueryWorkspaceProps } from './types.js';
+export type { Payload, QuerySchema, QueryState } from '../query/types.js';

@@ -7,12 +7,15 @@ import { assertPublicBoundary, inspectModule, inspectPublicGraph, packageRoot } 
 
 test('all documented public exports stay within the browser-safe source graph', () => {
   const result = assertPublicBoundary();
-  assert.ok(result.files.includes('src/svelte/GuardShapeBuilder.svelte'));
+  assert.ok(result.files.includes('src/svelte/SavedQueryWorkspace.svelte'));
   assert.ok(result.files.includes('src/adapters/dmmf.ts'));
   assert.ok(result.files.includes('src/core/compiler.ts'));
-  assert.ok(result.files.includes('src/svelte/styles.css'));
+  assert.ok(result.files.includes('src/svelte/workspace.css'));
   assert.ok(result.files.length >= 20);
-  assert.deepEqual(result.external, []);
+  assert.ok(result.files.some(file => file.endsWith('src/components/ArgTree.svelte')));
+  assert.ok(result.files.some(file => file.endsWith('src/components/CodePreview.svelte')));
+  assert.ok(result.files.some(file => file.endsWith('src/components/QueryEditor.svelte')));
+  assert.ok(!result.external.some(name => /prisma|database|adapter/.test(name)));
 });
 
 for (const source of [
@@ -64,7 +67,9 @@ for (const [name, contents] of [
 test('consumer dependencies cannot inherit standalone Prisma or database adapters', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   assert.deepEqual(pkg.dependencies ?? {}, {});
-  assert.deepEqual(Object.keys(pkg.peerDependencies), ['svelte']);
+  assert.ok(Object.keys(pkg.peerDependencies).includes('codemirror'));
+  assert.ok(Object.keys(pkg.peerDependencies).every(name => !/prisma|database|adapter/.test(name)));
+  assert.ok(Object.values(pkg.peerDependenciesMeta).every(value => value.optional));
   assert.equal(pkg.peerDependenciesMeta.svelte.optional, true);
   assert.ok(!Object.keys(pkg.devDependencies).some(name => /prisma|adapter|database/i.test(name)));
   assert.equal(pkg.private, true);

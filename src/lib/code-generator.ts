@@ -1,5 +1,5 @@
-import type { QueryState, PayloadValue } from "./types.ts";
-import { normalizePrismaPayload } from "./helpers.ts";
+import type { QueryState, PayloadValue } from "../../packages/guard-editor/src/query/types.js";
+import { normalizePrismaPayload } from "../../packages/guard-editor/src/query/payload.js";
 
 const INITIAL_INDENT = 1;
 
@@ -68,7 +68,7 @@ function formatPayload(
   if (entries.length === 0) return "{}";
 
   const lines = entries.map(([key, value]) => {
-    const formattedValue = formatPayload(value as any, indent + 1, nextStack);
+    const formattedValue = formatPayload(value, indent + 1, nextStack);
     const safeKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(key)
       ? key
       : `"${escapeString(key)}"`;

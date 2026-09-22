@@ -824,7 +824,10 @@ MIT
 - Query optimization powered by [prisma-sql](https://github.com/teamdrive/prisma-sql)
 
 ---
+## Controlled saved-query templates
 
-## Guard-policy editor preparation
+The private [`packages/guard-editor`](packages/guard-editor/README.md) package exposes a controlled `SavedQueryWorkspace` and the shared `ControlledQueryBuilder`. It authors concrete named Prisma templates; guards are deterministic internal artifacts, not a second editor.
 
-The separate private source package in [`packages/guard-editor`](packages/guard-editor/README.md) provides a browser-safe policy core, a Prisma 6/7 structural DMMF adapter and a controlled Svelte 5 `GuardShapeBuilder`. It does not execute queries or persist policy. Its public imports do not depend on this standalone playground or its database adapters. This addition does not change `QueryBuilder` or its existing exports. See the package README and Dee Wan's preparation report for the public API, conservative compiler subset and actual verification status.
+The original playground and controlled workspace share `ArgTree`, `CodePreview`, `QueryEditor` and the query tab bar. Execution and history remain standalone owner concerns. The lightweight package's headless APIs do not import the playground's Prisma runtime or adapters. UI peers are the same libraries already used by the original editor.
+
+The original public exports remain. Packaging stages shared files from one canonical source location, including the controlled workspace when appropriate. See the package README for the saved-query metadata, trusted usage manifest, conservative derivation, owner-confirmed saving and real Dee Wan shell preview. Verification limits are in the implementation report.

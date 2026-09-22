@@ -1,6 +1,6 @@
 import { OPERATIONS, OPERATORS, RELATION_OPERATORS, type Capabilities, type DataRule, type ForceTarget, type ForcedValue, type GuardPolicy, type JsonValue, type ModelDescriptor, type Pagination, type PolicyContext, type SchemaDescriptor, type Selection, type ValidationResult, type ValueField, type WhereRule } from './types.js';
 import { array, bool, distinct, enumeration, integer, keys, name, names, parseJson, readJsonValue, record, refuse, resultOf, sorted, canonicalJson } from './json.js';
-import { fieldFor, modelFor, readSchema, valueField } from './schema.js';
+import { fieldFor, modelFor, readSchema, valueField, usesForcedStringMode } from './schema.js';
 import { capabilityFor, readCapabilities } from './capabilities.js';
 
 export function isMany(operation: string): boolean { return operation === 'findMany' || operation === 'findManyPaginated'; }
@@ -100,8 +100,7 @@ function hasForced(rules: WhereRule[], schema: SchemaDescriptor, model: ModelDes
     if (rule.kind === 'relation' && field.kind === 'relation') {
       return rule.branches.some(branch => hasForced(branch.where, schema, modelFor(schema, field.model)));
     }
-    return rule.kind === 'scalar' && field.kind === 'scalar' && field.type === 'String' && !field.list &&
-      rule.operators.some(operator => ['equals', 'contains', 'startsWith', 'endsWith'].includes(operator));
+    return rule.kind === 'scalar' && usesForcedStringMode(field, rule.operators);
   });
 }
 

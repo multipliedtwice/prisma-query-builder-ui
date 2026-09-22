@@ -1,15 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { QueryBuilder } from "../lib/query-builder.svelte.ts";
-  import ArgTree from "./ArgTree.svelte";
-  import CodePreview from "./CodePreview.svelte";
+  import QueryEditor from "./QueryEditor.svelte";
+  import QueryTabBar from "./QueryTabBar.svelte";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
-  import * as Resizable from "$lib/components/ui/resizable/index.js";
   import Button from "$lib/components/ui/button/button.svelte";
   import {
     Plus,
-    X,
-    Pencil,
     Save,
     TriangleAlert,
     Github,
@@ -50,8 +47,6 @@
   let tabs = $state<QueryTab[]>([]);
   let activeTabId = $state("1");
   let nextTabId = $state(2);
-  let editingTabId = $state<string | null>(null);
-  let editingTabName = $state("");
   let isSaving = $state(false);
   let isLoadingQueries = $state(false);
   let isDark = $state(false);
@@ -140,8 +135,8 @@
     nextTabId++;
   }
 
-  function closeTab(tabId: string, event: MouseEvent) {
-    event.stopPropagation();
+  function closeTab(tabId: string, event?: MouseEvent) {
+    event?.stopPropagation();
     if (tabs.length === 1) return;
 
     const tab = tabs.find((t) => t.id === tabId);
@@ -158,78 +153,6 @@
     if (activeTabId === tabId) {
       const newIndex = Math.min(index, tabs.length - 1);
       activeTabId = tabs[newIndex].id;
-    }
-  }
-
-  function startEditingTab(tabId: string, event: MouseEvent) {
-    event.stopPropagation();
-    const tab = tabs.find((t) => t.id === tabId);
-    if (!tab) return;
-
-    editingTabId = tabId;
-    editingTabName = tab.label;
-  }
-
-  function finishEditingTab() {
-    if (!editingTabId) return;
-
-    const tab = tabs.find((t) => t.id === editingTabId);
-    if (tab && editingTabName.trim()) {
-      tab.label = editingTabName.trim();
-      tab.isCustomName = true;
-    }
-
-    editingTabId = null;
-    editingTabName = "";
-  }
-
-  function cancelEditingTab() {
-    editingTabId = null;
-    editingTabName = "";
-  }
-
-  function handleArgAdd(argName: string | string[], initialValue?: PayloadValue) {
-    if (activeBuilder) {
-      activeBuilder.addArg(argName, initialValue ?? {});
-      if (activeTab) markDirty(activeTab);
-    }
-  }
-
-  function handleFieldToggle(detail: {
-    field: string;
-    value: PayloadValue | undefined;
-  }) {
-    if (activeBuilder) {
-      activeBuilder.toggleField(detail.field, detail.value);
-      if (activeTab) markDirty(activeTab);
-    }
-  }
-
-  function handleBreadcrumbClick(index: number) {
-    if (activeBuilder) {
-      activeBuilder.removeArg(index);
-      if (activeTab) markDirty(activeTab);
-    }
-  }
-
-  function handleAddArrayItem(arrayPath: string[]) {
-    if (activeBuilder) {
-      activeBuilder.addArrayItem(arrayPath);
-      if (activeTab) markDirty(activeTab);
-    }
-  }
-
-  function handleRemoveArrayItem(arrayPath: string[], index: number) {
-    if (activeBuilder) {
-      activeBuilder.removeArrayItem(arrayPath, index);
-      if (activeTab) markDirty(activeTab);
-    }
-  }
-
-  function handleEditPayload(payload: Payload) {
-    if (activeBuilder) {
-      activeBuilder.replacePayload(payload);
-      if (activeTab) markDirty(activeTab);
     }
   }
 
@@ -492,58 +415,11 @@
     <div
       class="h-[60px] shrink-0 flex items-center gap-2 border-b border-border px-4 bg-muted overflow-x-auto"
     >
-      <Tabs.List class="h-auto">
-        {#each tabs as tab}
-          {@const isIncompatible =
-            tab.workspaceId !== null && tab.workspaceId !== currentWorkspaceId}
-          <Tabs.Trigger
-            value={tab.id}
-            class="relative group max-w-[200px] {isIncompatible
-              ? 'opacity-50'
-              : ''}"
-            disabled={isIncompatible || isLoadingQueries}
-          >
-            {#if editingTabId === tab.id}
-              <input
-                type="text"
-                class="w-full px-1 py-0.5 text-sm bg-background border border-border rounded"
-                bind:value={editingTabName}
-                onkeydown={(e) => {
-                  if (e.key === "Enter") finishEditingTab();
-                  if (e.key === "Escape") cancelEditingTab();
-                }}
-                onblur={finishEditingTab}
-                onclick={(e) => e.stopPropagation()}
-              />
-            {:else}
-              <span class="truncate block pr-10">
-                {tab.label}
-                {#if tab.isDirty}<span class="text-primary">•</span>{/if}
-              </span>
-              <div
-                class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1"
-              >
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-70 hover:opacity-100 transition-opacity"
-                  onclick={(e) => startEditingTab(tab.id, e)}
-                >
-                  <Pencil class="h-3 w-3" />
-                </button>
-                {#if tabs.length > 1}
-                  <button
-                    type="button"
-                    class="inline-flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-70 hover:opacity-100 transition-opacity"
-                    onclick={(e) => closeTab(tab.id, e)}
-                  >
-                    <X class="h-3 w-3" />
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </Tabs.Trigger>
-        {/each}
-      </Tabs.List>
+      <QueryTabBar tabs={tabs.map(tab => ({ id: tab.id, name: tab.label, dirty: tab.isDirty,
+        disabled: (tab.workspaceId !== null && tab.workspaceId !== currentWorkspaceId) || isLoadingQueries }))}
+        activeId={activeTabId} panelId={`standalone-query-${activeTabId}`}
+        onselect={id => activeTabId = id} onclose={tabs.length > 1 ? closeTab : undefined}
+        onrename={(id, name) => { const tab = tabs.find(tab => tab.id === id); if (tab) { tab.label = name; tab.isCustomName = true; tab.isDirty = true; } }} />
 
       <Button
         variant="ghost"
@@ -597,44 +473,12 @@
     {#each tabs as tab (tab.id)}
       <Tabs.Content
         value={tab.id}
+        id={`standalone-query-${tab.id}`}
         class="flex-1 m-0 p-0 data-[state=active]:flex"
       >
-        <Resizable.PaneGroup direction="horizontal" class="h-full">
-          <Resizable.Pane defaultSize={40} minSize={20} maxSize={60}>
-            {#if tab.builder.state.operation}
-              <ArgTree
-                operation={tab.builder.state.operation}
-                {parser}
-                queryState={tab.builder.state}
-                onaddarg={handleArgAdd}
-                ontogglefield={handleFieldToggle}
-                onbreadcrumbclick={handleBreadcrumbClick}
-                onaddarrayitem={handleAddArrayItem}
-                onremovearrayitem={handleRemoveArrayItem}
-              />
-            {:else}
-              <div class="flex h-full items-center justify-center p-8">
-                <p class="text-muted-foreground">
-                  Select an operation to start building your query
-                </p>
-              </div>
-            {/if}
-          </Resizable.Pane>
-
-          <Resizable.Handle withHandle />
-
-          <Resizable.Pane defaultSize={60} minSize={40} maxSize={80}>
-            <CodePreview
-              queryState={tab.builder.state}
-              onrun={handleRun}
-              oneditpayload={handleEditPayload}
-              bind:usePrismaSql
-              hasWorkspace={currentWorkspaceId !== null}
-              {isEmbedded}
-              {embeddedHasDatabase}
-            />
-          </Resizable.Pane>
-        </Resizable.PaneGroup>
+        <QueryEditor {parser} queryState={tab.builder.state}
+          onstatechange={state => { const changed = payloadHash(state.payload) !== payloadHash(tab.builder.state.payload); tab.builder.state = state; if (changed) tab.isDirty = payloadHash(state.payload) !== tab.initialPayload; }}
+          onrun={handleRun} bind:usePrismaSql hasWorkspace={currentWorkspaceId !== null} {isEmbedded} {embeddedHasDatabase} />
       </Tabs.Content>
     {/each}
   </Tabs.Root>

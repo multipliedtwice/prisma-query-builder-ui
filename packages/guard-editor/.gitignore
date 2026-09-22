@@ -2,3 +2,5 @@ node_modules/
 dist/
 .browser-build/
 .browser-results/
+
+.shell-results/

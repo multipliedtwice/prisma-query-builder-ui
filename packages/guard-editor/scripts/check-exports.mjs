@@ -19,9 +19,12 @@ for (const [subpath, conditions] of Object.entries(manifest.exports)) {
   }
   if (subpath === './svelte') {
     assert.equal(conditions.svelte, conditions.import);
-    assert.ok(fs.existsSync(path.join(packageRoot, 'dist/svelte/GuardShapeBuilder.svelte')));
-    assert.ok(fs.existsSync(path.join(packageRoot, 'dist/svelte/GuardShapeBuilder.svelte.d.ts')));
-    assert.ok(fs.existsSync(path.join(packageRoot, 'dist/svelte/styles.css')));
+    for (const target of ['svelte/SavedQueryWorkspace.svelte', 'svelte/SavedQueryWorkspace.svelte.d.ts', 'svelte/workspace.css', 'svelte/primitives/SplitView.svelte', 'shared/components/QueryEditor.svelte', 'shared/components/ArgTree.svelte', 'shared/components/CodePreview.svelte', 'shared/components/QueryTabBar.svelte']) {
+      assert.ok(fs.existsSync(path.join(packageRoot, 'dist', target)), `Missing shared query workspace file: ${target}`);
+    }
+    const entry = fs.readFileSync(path.join(packageRoot, conditions.import), 'utf8');
+    assert.doesNotMatch(entry, /GuardShapeBuilder|GuardShapeWorkspace/);
+
   } else {
     const exported = await import(pathToFileURL(path.join(packageRoot, conditions.import)).href);
     assert.ok(Object.keys(exported).length > 0, `Empty module ${subpath}`);
@@ -29,7 +32,7 @@ for (const [subpath, conditions] of Object.entries(manifest.exports)) {
   checked += 1;
 }
 const core = await import(pathToFileURL(path.join(packageRoot, 'dist/index.js')).href);
-for (const symbol of ['readSchema', 'readCapabilities', 'readPolicy', 'validatePolicy', 'parsePolicy', 'serializePolicy', 'canonicalJson', 'compilePolicy', 'inspectEditorPolicy', 'proposePolicyChange']) {
+for (const symbol of ['readSchema', 'readCapabilities', 'readPolicy', 'validatePolicy', 'parsePolicy', 'serializePolicy', 'canonicalJson', 'compilePolicy', 'inspectEditorPolicy', 'proposePolicyChange', 'readSavedQueries', 'deriveGuard', 'generateUsageManifest', 'createQuerySchema']) {
   assert.equal(typeof core[symbol], 'function', `Missing public API ${symbol}`);
 }
 const adapter = await import(pathToFileURL(path.join(packageRoot, 'dist/adapters/dmmf.js')).href);

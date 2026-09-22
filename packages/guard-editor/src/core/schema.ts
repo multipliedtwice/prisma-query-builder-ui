@@ -93,3 +93,8 @@ export function readSchema(input: unknown): SchemaDescriptor {
   }
   return schema;
 }
+
+export function usesForcedStringMode(field: FieldDescriptor, operators: readonly string[]): boolean {
+  return field.kind === 'scalar' && field.type === 'String' && !field.list &&
+    operators.some(operator => ['equals', 'contains', 'startsWith', 'endsWith'].includes(operator));
+}

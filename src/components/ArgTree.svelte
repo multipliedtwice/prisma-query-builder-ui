@@ -1,7 +1,8 @@
 <script lang="ts">
-  import Button from "$lib/components/ui/button/button.svelte";
-  import { Card } from "$lib/components/ui/card/index.js";
-  import type { DMMFParser } from "../lib/dmmf-parser.ts";
+  import Button from "../lib/components/ui/button/button.svelte";
+  import ArgumentBreadcrumbs from "../../packages/guard-editor/src/svelte/primitives/ArgumentBreadcrumbs.svelte";
+  import { Card } from "../lib/components/ui/card/index.js";
+  import type { QuerySchema } from "../../packages/guard-editor/src/query/types.js";
   import type {
     Operation,
     QueryState,
@@ -10,15 +11,15 @@
     ArgContext,
     PayloadValue,
     DmmfInputTypeRef,
-  } from "../lib/types.ts";
-  import { isPlainObject } from "../lib/helpers.ts";
+  } from "../../packages/guard-editor/src/query/types.js";
+  import { isPlainObject, valueAt } from "../../packages/guard-editor/src/query/payload.js";
   import {
     isObjectRef,
     isEnumRef,
     isScalarRef,
     hasEnumType,
     getEnumTypeName,
-  } from "../lib/dmmf-utils.ts";
+  } from "../lib/dmmf-utils.js";
 
   let {
     operation,
@@ -29,9 +30,11 @@
     onbreadcrumbclick,
     onaddarrayitem,
     onremovearrayitem,
+    readOnly = false,
   }: {
+    readOnly?: boolean;
     operation: Operation;
-    parser: DMMFParser;
+    parser: QuerySchema;
     queryState: QueryState;
     onaddarg: (argName: string | string[], initialValue?: PayloadValue) => void;
     ontogglefield: (detail: {
@@ -50,6 +53,7 @@
 
   function handleCardKeydown(callback: () => void) {
     return (e: KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         callback();
@@ -148,8 +152,9 @@
   function defaultScalarValue(typeName: string): PayloadValue {
     const t = typeName.trim();
     if (t === "Boolean") return false;
-    if (t === "Int" || t === "Float" || t === "BigInt" || t === "Decimal")
-      return 0;
+    if (t === "Int" || t === "Float") return 0;
+    if (t === "BigInt") return 0;
+    if (t === "Decimal") return "0";
     if (t === "DateTime") return new Date().toISOString();
     return "";
   }
@@ -259,47 +264,10 @@
     return "";
   }
 
-  let currentNodePayload = $derived.by(() => {
-    let current: any = queryState.payload;
-
-    for (const key of queryState.path) {
-      if (current === null || typeof current !== "object") return null;
-      if (Array.isArray(current) && /^\d+$/.test(key)) {
-        current = current[parseInt(key, 10)];
-      } else {
-        if (current[key] === undefined) return null;
-        current = current[key];
-      }
-    }
-
-    if (current === null || typeof current !== "object") return null;
-    return current;
-  });
-
-  function getCurrentPathValue(): PayloadValue | undefined {
-    if (queryState.path.length === 0) return undefined;
-
-    let current: any = queryState.payload;
-    for (const key of queryState.path) {
-      if (current === null || typeof current !== "object") return undefined;
-      if (Array.isArray(current) && /^\d+$/.test(key)) {
-        current = current[parseInt(key, 10)];
-      } else {
-        if (current[key] === undefined) return undefined;
-        current = current[key];
-      }
-    }
-    return current as PayloadValue;
-  }
-
-  function getFieldValue(fieldName: string): any {
-    if (!currentNodePayload) return undefined;
-    return (currentNodePayload as any)[fieldName];
-  }
-
-  function getArgValue(argName: string): any {
-    return (queryState.payload as any)[argName];
-  }
+  let currentNodePayload = $derived(valueAt(queryState.payload, queryState.path));
+  function getCurrentPathValue(): PayloadValue | undefined { return currentNodePayload; }
+  function getFieldValue(fieldName: string): PayloadValue | undefined { return valueAt(queryState.payload, [...queryState.path, fieldName]); }
+  function getArgValue(argName: string): PayloadValue | undefined { return queryState.payload[argName]; }
 
   function getCurrentEnumOptions(): EnumOption[] | null {
     const node = resolveNodeAtPath();
@@ -452,15 +420,7 @@
 
   let currentArrayValue = $derived.by((): PayloadValue[] | null => {
     if (!isAtArrayLevel) return null;
-    let current: any = queryState.payload;
-    for (const key of queryState.path) {
-      if (current === null || typeof current !== "object") return null;
-      if (Array.isArray(current) && /^\d+$/.test(key)) {
-        current = current[parseInt(key, 10)];
-      } else {
-        current = current[key];
-      }
-    }
+    const current = valueAt(queryState.payload, queryState.path);
     return Array.isArray(current) ? current : null;
   });
 
@@ -480,15 +440,7 @@
 
   let arrayBarContext = $derived.by(() => {
     if (!arrayInfo) return null;
-    let current: any = queryState.payload;
-    for (const key of arrayInfo.arrayPath) {
-      if (current === null || typeof current !== "object") return null;
-      if (Array.isArray(current) && /^\d+$/.test(key)) {
-        current = current[parseInt(key, 10)];
-      } else {
-        current = current[key];
-      }
-    }
+    const current = valueAt(queryState.payload, arrayInfo.arrayPath);
     if (!Array.isArray(current)) return null;
     return {
       currentIndex: arrayInfo.itemIndex,
@@ -569,7 +521,7 @@
     if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
       if (
         currentValue !== undefined &&
-        isPlainObject(currentValue as unknown)
+        isPlainObject(currentValue)
       ) {
         onaddarg(arg.name, currentValue as PayloadValue);
       } else {
@@ -662,7 +614,7 @@
     if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
       if (
         currentValue !== undefined &&
-        isPlainObject(currentValue as unknown)
+        isPlainObject(currentValue)
       ) {
         onaddarg(field.name, currentValue as PayloadValue);
       } else {
@@ -733,6 +685,7 @@
   }
 
   function handleEnumOptionClick(option: EnumOption) {
+    if (readOnly) return;
     if (queryState.path.length === 0) return;
 
     const lastPathSegment = queryState.path[queryState.path.length - 1];
@@ -748,20 +701,12 @@
   let context = $derived(getCurrentContext());
 </script>
 
-<div class="@container flex flex-col h-full">
-  <div
-    class="h-[52px] shrink-0 flex flex-wrap items-center gap-2 px-4 border-b border-border text-sm overflow-x-auto"
-  >
-    <Button variant="ghost" size="sm" onclick={() => onbreadcrumbclick(-1)}>
-      {operation.model}.{operation.method}
-    </Button>
-    {#each queryState.path as segment, i}
-      <span class="text-muted-foreground">/</span>
-      <Button variant="ghost" size="sm" onclick={() => onbreadcrumbclick(i)}>
-        {segment.match(/^\d+$/) ? `[${segment}]` : segment}
-      </Button>
-    {/each}
-  </div>
+<div class="@container flex flex-col h-full min-w-0">
+  <ArgumentBreadcrumbs
+    root={`${operation.model}.${operation.method}`}
+    path={queryState.path}
+    onNavigate={onbreadcrumbclick}
+  />
 
   {#if arrayBarContext}
     <div
@@ -771,6 +716,7 @@
         variant="ghost"
         size="sm"
         class="h-7 px-2"
+        aria-label="Previous array item"
         disabled={arrayBarContext.currentIndex === 0}
         onclick={() => navigateToArrayItem(arrayBarContext.currentIndex - 1)}
       >
@@ -783,6 +729,7 @@
         variant="ghost"
         size="sm"
         class="h-7 px-2"
+        aria-label="Next array item"
         disabled={arrayBarContext.currentIndex >=
           arrayBarContext.totalItems - 1}
         onclick={() => navigateToArrayItem(arrayBarContext.currentIndex + 1)}
@@ -793,6 +740,8 @@
         variant="ghost"
         size="sm"
         class="h-7 px-2"
+        disabled={readOnly}
+        aria-label="Add array item"
         onclick={handleAddArrayItemInline}
       >
         +
@@ -802,6 +751,8 @@
           variant="ghost"
           size="sm"
           class="h-7 px-2"
+          disabled={readOnly}
+          aria-label="Remove array item"
           onclick={handleRemoveCurrentItem}
         >
           −
@@ -843,6 +794,7 @@
         <Button
           variant="outline"
           size="sm"
+          disabled={readOnly}
           onclick={handleAddArrayItemFromOverview}
         >
           + Add Item
@@ -861,6 +813,7 @@
             {@const isSelected = currentValue === option.value}
             <Card
               class={`p-3 cursor-pointer transition-colors ${isSelected ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
+              aria-disabled={readOnly}
               onclick={() => handleEnumOptionClick(option)}
               onkeydown={handleCardKeydown(() => handleEnumOptionClick(option))}
               role="button"
@@ -899,28 +852,27 @@
               {@const isActive = v !== undefined}
 
               <Card
-                class={`p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
-                onclick={() => handleFieldClick(field)}
-                onkeydown={handleCardKeydown(() => handleFieldClick(field))}
-                role="button"
-                tabindex={0}
-              >
+                class={`relative p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
+                >
                 <div class="flex items-center justify-between gap-2">
-                  <div
-                    class="flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5"
-                  >
-                    <span class="font-medium shrink-0">{field.name}</span>
+                  <button type="button"
+                    class="min-h-11 sm:min-h-0 text-left flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5 outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+
+                    disabled={readOnly && !isExpandable}
+                    aria-label={`${isExpandable ? "Open" : isActive ? "Remove" : "Add"} ${field.name}`}
+                    onclick={() => handleFieldClick(field)}>
+                    <span class="font-medium min-w-0 break-words">{field.name}</span>
                     <span
                       class="text-xs font-mono truncate max-w-[120px] @xs:max-w-[160px] @sm:max-w-[200px] @md:max-w-none {field.isRelation &&
                       !isEnum
                         ? 'text-primary'
                         : 'text-muted-foreground'}"
                       title={field.isRelation && !isEnum
-                        ? field.relationModel
+                        ? (field.relationModel ?? field.type)
                         : field.type}
                     >
                       {field.isRelation && !isEnum
-                        ? field.relationModel
+                        ? (field.relationModel ?? field.type)
                         : field.type}
                     </span>
                     {#if isActive && isListTyped}
@@ -949,13 +901,15 @@
                         >(no fields)</span
                       >
                     {/if}
-                  </div>
+                  </button>
 
                   {#if isExpandable || isListTyped}
                     <Button
                       variant={isActive ? "default" : "secondary"}
                       size="icon"
-                      class="h-6 w-6 shrink-0"
+                      class="relative z-10 h-8 w-8 shrink-0 max-sm:min-h-11 max-sm:min-w-11"
+                      disabled={readOnly}
+                      aria-label={`${isActive ? "Remove" : "Add"} ${field.name}`}
                       onclick={(e) => handleFieldButtonClick(field, e)}
                     >
                       {isActive ? "−" : "+"}
@@ -986,17 +940,16 @@
             {@const isActive = v !== undefined}
 
             <Card
-              class={`p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
-              onclick={() => handleArgClick(arg)}
-              onkeydown={handleCardKeydown(() => handleArgClick(arg))}
-              role="button"
-              tabindex={0}
-            >
+              class={`relative p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
+>
               <div class="flex items-center justify-between gap-2">
-                <div
-                  class="flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5"
-                >
-                  <span class="font-medium shrink-0">{arg.name}</span>
+                <button type="button"
+                  class="min-h-11 sm:min-h-0 text-left flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5 outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+
+                    disabled={readOnly && !isExpandable}
+                    aria-label={`${isExpandable ? "Open" : isActive ? "Remove" : "Add"} ${arg.name}`}
+                    onclick={() => handleArgClick(arg)}>
+                  <span class="font-medium min-w-0 break-words">{arg.name}</span>
                   <span
                     class="text-xs text-muted-foreground font-mono truncate max-w-[120px] @xs:max-w-[160px] @sm:max-w-[200px] @md:max-w-none"
                     title={arg.type}
@@ -1024,12 +977,14 @@
                       >(no fields)</span
                     >
                   {/if}
-                </div>
+                </button>
                 {#if isExpandable || isListTyped}
                   <Button
                     variant={isActive ? "default" : "secondary"}
                     size="icon"
-                    class="h-6 w-6 shrink-0"
+                    class="relative z-10 h-8 w-8 shrink-0 max-sm:min-h-11 max-sm:min-w-11"
+                    disabled={readOnly}
+                    aria-label={`${isActive ? "Remove" : "Add"} ${arg.name}`}
                     onclick={(e) => handleArgButtonClick(arg, e)}
                   >
                     {isActive ? "−" : "+"}

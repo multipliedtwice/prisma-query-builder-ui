@@ -1,4 +1,4 @@
-import type { DmmfInputTypeRef } from "./types.ts";
+import type { DmmfInputTypeRef } from "../../packages/guard-editor/src/query/types.js";
 
 export function isObjectRef(r: DmmfInputTypeRef): boolean {
   const loc = (r.location ?? "").toLowerCase();
