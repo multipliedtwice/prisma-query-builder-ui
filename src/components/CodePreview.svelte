@@ -1,10 +1,19 @@
 <script lang="ts">
+  import {
+    englishQueryCopy,
+    queryErrorText,
+    queryEditorPhrases,
+    type QueryTranslator,
+  } from "../../packages/guard-editor/src/svelte/copy.js";
   import { generateCode } from "../lib/code-generator.js";
   import { parsePrismaQuery } from "../../packages/guard-editor/src/query/parse-code.js";
-  import type { QueryState, Payload } from "../../packages/guard-editor/src/query/types.js";
+  import type {
+    QueryState,
+    Payload,
+  } from "../../packages/guard-editor/src/query/types.js";
   import { onMount, untrack } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
-  import { EditorState } from "@codemirror/state";
+  import { Compartment, EditorState } from "@codemirror/state";
   import { javascript } from "@codemirror/lang-javascript";
   import { oneDark } from "@codemirror/theme-one-dark";
   import { Wand, Copy, Play, Check } from "@lucide/svelte";
@@ -13,6 +22,7 @@
   import { Label } from "../lib/components/ui/label/index.js";
 
   let {
+    translate = englishQueryCopy,
     queryState,
     onrun,
     readOnly = false,
@@ -25,6 +35,7 @@
     isEmbedded = false,
     embeddedHasDatabase = false,
   }: {
+    translate?: QueryTranslator;
     queryState: QueryState;
     onrun?: (() => void) | undefined;
     readOnly?: boolean;
@@ -40,13 +51,19 @@
 
   type CopyStatus = "idle" | "copying" | "success" | "error";
   let copyStatus = $state<CopyStatus>("idle");
-  let parseError = $state<string | null>(null);
+  let parseFailure = $state<Error | null>(null);
+  const parseError = $derived(
+    parseFailure ? queryErrorText(parseFailure, translate) : null,
+  );
+  const locale = new Compartment();
   let editorHasFocus = $state(false);
   let applyGeneration = 0;
   let disposed = false;
 
   let generatedCode = $derived(generateCode(queryState) || "");
-  let canRun = $derived(queryState.operation !== null && !parseError && !readOnly);
+  let canRun = $derived(
+    queryState.operation !== null && !parseError && !readOnly,
+  );
 
   let editorContainer: HTMLDivElement | null = $state(null);
   let editorView: EditorView | null = $state(null);
@@ -78,13 +95,19 @@
   function applyEditorContent(): boolean {
     if (readOnly) return false;
     try {
-      const parsed = parsePrismaQuery(editorView?.state.doc.toString() ?? draft ?? generatedCode, queryState.operation);
-      parseError = null;
+      const parsed = parsePrismaQuery(
+        editorView?.state.doc.toString() ?? draft ?? generatedCode,
+        queryState.operation,
+      );
+      parseFailure = null;
       onvaliditychange?.(true);
       oneditpayload(parsed);
       return true;
     } catch (error) {
-      parseError = error instanceof Error ? error.message : 'Invalid query arguments';
+      parseFailure =
+        error instanceof Error
+          ? error
+          : new Error(translate("errorInvalid", { code: "query" }));
       onvaliditychange?.(false);
       return false;
     }
@@ -137,9 +160,16 @@
 
     const extensions = [
       basicSetup,
+      locale.of([
+        EditorState.phrases.of(queryEditorPhrases(translate)),
+        EditorView.contentAttributes.of({
+          "aria-label": translate("prismaQuery"),
+          "aria-multiline": "true",
+          role: "textbox",
+        }),
+      ]),
       EditorState.readOnly.of(readOnly),
       EditorView.editable.of(!readOnly),
-      EditorView.contentAttributes.of({ "aria-label": "Prisma query", "aria-multiline": "true", "role": "textbox" }),
       EditorView.lineWrapping,
       javascript({ typescript: true }),
       createEditorTheme(),
@@ -199,7 +229,8 @@
     });
 
     return () => {
-      disposed = true; applyGeneration++;
+      disposed = true;
+      applyGeneration++;
       if (debounceTimer) clearTimeout(debounceTimer);
       if (editorView) {
         editorView.destroy();
@@ -212,12 +243,32 @@
   $effect(() => {
     const code = draft ?? generatedCode;
     if (editorView && !editorHasFocus) updateEditorContent(code);
-    if (draft === null) { parseError = null; untrack(() => onvaliditychange?.(true)); }
+    if (draft === null) {
+      parseFailure = null;
+      untrack(() => onvaliditychange?.(true));
+    }
   });
 
   $effect(() => {
     const immutable = readOnly;
-    if (editorView && editorView.state.readOnly !== immutable) createEditor(editorView.state.doc.toString());
+    if (editorView && editorView.state.readOnly !== immutable)
+      createEditor(editorView.state.doc.toString());
+  });
+
+  $effect(() => {
+    const phrases = queryEditorPhrases(translate);
+    const label = translate("prismaQuery");
+    if (editorView)
+      editorView.dispatch({
+        effects: locale.reconfigure([
+          EditorState.phrases.of(phrases),
+          EditorView.contentAttributes.of({
+            "aria-label": label,
+            "aria-multiline": "true",
+            role: "textbox",
+          }),
+        ]),
+      });
   });
 
   async function copyToClipboard() {
@@ -261,7 +312,13 @@
         tabWidth: 2,
       });
 
-      if (disposed || readOnly || generation !== applyGeneration || editorView?.state.doc.toString() !== text) return;
+      if (
+        disposed ||
+        readOnly ||
+        generation !== applyGeneration ||
+        editorView?.state.doc.toString() !== text
+      )
+        return;
       updateEditorContent(formatted.trimEnd());
       ondraftchange?.(formatted.trimEnd());
       applyEditorContent();
@@ -269,27 +326,32 @@
   }
 
   function handleRun() {
-    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
     if (applyEditorContent()) onrun?.();
   }
 
   let copyAria = $derived(
     copyStatus === "copying"
-      ? "Copying"
+      ? translate("copying")
       : copyStatus === "success"
-        ? "Copied"
+        ? translate("copied")
         : copyStatus === "error"
-          ? "Copy failed"
-          : "Copy",
+          ? translate("copyFailed")
+          : translate("copy"),
   );
 </script>
 
-<div class="@container flex flex-col bg-muted/30 h-full min-w-0">
+<div
+  class="query-code-preview @container flex flex-col bg-muted/30 h-full min-w-0"
+>
   <div
     class="query-code-header h-[52px] shrink-0 flex items-center justify-between px-4 border-b border-border"
   >
     <div class="query-code-title flex items-center gap-2">
-      <h3 class="text-sm font-semibold">Prisma Query</h3>
+      <h3 class="text-sm font-semibold">{translate("prismaQuery")}</h3>
     </div>
 
     <div class="flex items-center gap-2">
@@ -299,8 +361,8 @@
         class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
         disabled={readOnly}
         onclick={formatQuery}
-        aria-label="Format"
-        title="Format"
+        aria-label={translate("format")}
+        title={translate("format")}
       >
         <Wand class="h-4 w-4" />
       </Button>
@@ -322,17 +384,16 @@
       </Button>
 
       {#if onrun}
-      <Button
-        size="icon"
-        variant="default"
-        class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
-        onclick={handleRun}
-        disabled={!canRun}
-        aria-label="Run"
-      >
-        <Play class="h-4 w-4" />
-      </Button>
-
+        <Button
+          size="icon"
+          variant="default"
+          class="h-8 w-8 max-sm:min-h-11 max-sm:min-w-11"
+          onclick={handleRun}
+          disabled={!canRun}
+          aria-label={translate("run")}
+        >
+          <Play class="h-4 w-4" />
+        </Button>
       {/if}
 
       {#if onrun && showPrismaSqlToggle}
@@ -346,8 +407,8 @@
             for="prisma-sql-toggle"
             class="text-xs font-medium cursor-pointer select-none"
             title={usePrismaSql
-              ? "Using prisma-sql (2-7x faster)"
-              : "Using standard Prisma Client"}
+              ? translate("sqlClient")
+              : translate("standardClient")}
           >
             prisma-sql
           </Label>
@@ -356,18 +417,83 @@
     </div>
   </div>
 
-  <div class="flex-1 overflow-hidden p-4 relative">
+  <div class="flex min-h-0 flex-1 flex-col gap-2 p-4">
     <div
-      class="h-full rounded-md border bg-background {parseError ? 'border-destructive' : 'border-border'}"
+      class="min-h-0 flex-1 rounded-md border bg-background {parseError
+        ? 'border-destructive'
+        : 'border-border'}"
       bind:this={editorContainer}
     ></div>
 
     {#if parseError}
       <div
-        class="absolute bottom-5 left-5 right-5 bg-destructive/10 border border-destructive rounded px-3 py-2"
+        class="max-h-28 shrink-0 overflow-y-auto bg-destructive/10 border border-destructive rounded px-3 py-2"
+        data-testid="query-code-error"
       >
         <p role="alert" class="text-xs text-destructive">{parseError}</p>
       </div>
     {/if}
   </div>
 </div>
+
+<style>
+  @container query-editor (max-width: 559px) {
+    :global(.query-code-preview .cm-editor .cm-panels) {
+      max-height: min(60%, 16rem);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    :global(.query-code-preview .cm-editor .cm-scroller) {
+      min-height: 44px;
+    }
+    :global(.query-code-preview .cm-editor .cm-search) {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.375rem;
+      position: relative;
+      box-sizing: border-box;
+      max-width: 100%;
+      padding: 0.5rem 3.5rem 0.5rem 0.5rem;
+      font-size: 0.875rem;
+    }
+    :global(
+      .query-code-preview .cm-editor .cm-search input:not([type="checkbox"])
+    ) {
+      flex: 1 1 12rem;
+      box-sizing: border-box;
+      min-width: 0;
+      max-width: 100%;
+      min-height: 44px;
+      font-size: 16px;
+    }
+    :global(.query-code-preview .cm-editor .cm-search button),
+    :global(.query-code-preview .cm-editor .cm-search label) {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.375rem;
+      min-height: 44px;
+      min-width: 44px;
+      max-width: 100%;
+      white-space: normal;
+      box-sizing: border-box;
+    }
+    :global(.query-code-preview .cm-editor .cm-search button) {
+      padding: 0.375rem 0.5rem;
+      font: inherit;
+    }
+    :global(
+      .query-code-preview .cm-editor .cm-search label input[type="checkbox"]
+    ) {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+    }
+    :global(.query-code-preview .cm-editor .cm-search button[name="close"]) {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.25rem;
+    }
+  }
+</style>

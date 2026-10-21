@@ -1,4 +1,8 @@
 <script lang="ts">
+  import {
+    englishQueryCopy,
+    type QueryTranslator,
+  } from "../../packages/guard-editor/src/svelte/copy.js";
   import Button from "../lib/components/ui/button/button.svelte";
   import ArgumentBreadcrumbs from "../../packages/guard-editor/src/svelte/primitives/ArgumentBreadcrumbs.svelte";
   import { Card } from "../lib/components/ui/card/index.js";
@@ -12,7 +16,10 @@
     PayloadValue,
     DmmfInputTypeRef,
   } from "../../packages/guard-editor/src/query/types.js";
-  import { isPlainObject, valueAt } from "../../packages/guard-editor/src/query/payload.js";
+  import {
+    isPlainObject,
+    valueAt,
+  } from "../../packages/guard-editor/src/query/payload.js";
   import {
     isObjectRef,
     isEnumRef,
@@ -22,6 +29,7 @@
   } from "../lib/dmmf-utils.js";
 
   let {
+    translate = englishQueryCopy,
     operation,
     parser,
     queryState,
@@ -32,6 +40,7 @@
     onremovearrayitem,
     readOnly = false,
   }: {
+    translate?: QueryTranslator;
     readOnly?: boolean;
     operation: Operation;
     parser: QuerySchema;
@@ -264,10 +273,18 @@
     return "";
   }
 
-  let currentNodePayload = $derived(valueAt(queryState.payload, queryState.path));
-  function getCurrentPathValue(): PayloadValue | undefined { return currentNodePayload; }
-  function getFieldValue(fieldName: string): PayloadValue | undefined { return valueAt(queryState.payload, [...queryState.path, fieldName]); }
-  function getArgValue(argName: string): PayloadValue | undefined { return queryState.payload[argName]; }
+  let currentNodePayload = $derived(
+    valueAt(queryState.payload, queryState.path),
+  );
+  function getCurrentPathValue(): PayloadValue | undefined {
+    return currentNodePayload;
+  }
+  function getFieldValue(fieldName: string): PayloadValue | undefined {
+    return valueAt(queryState.payload, [...queryState.path, fieldName]);
+  }
+  function getArgValue(argName: string): PayloadValue | undefined {
+    return queryState.payload[argName];
+  }
 
   function getCurrentEnumOptions(): EnumOption[] | null {
     const node = resolveNodeAtPath();
@@ -519,10 +536,7 @@
     }
 
     if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
-      if (
-        currentValue !== undefined &&
-        isPlainObject(currentValue)
-      ) {
+      if (currentValue !== undefined && isPlainObject(currentValue)) {
         onaddarg(arg.name, currentValue as PayloadValue);
       } else {
         ontogglefield({ field: arg.name, value: {} });
@@ -612,10 +626,7 @@
     }
 
     if (shouldPreferExpand(hasChildren, isNavigable, isEnum, ctx)) {
-      if (
-        currentValue !== undefined &&
-        isPlainObject(currentValue)
-      ) {
+      if (currentValue !== undefined && isPlainObject(currentValue)) {
         onaddarg(field.name, currentValue as PayloadValue);
       } else {
         if ((ctx === "select" || ctx === "include") && field.isRelation) {
@@ -703,6 +714,7 @@
 
 <div class="@container flex flex-col h-full min-w-0">
   <ArgumentBreadcrumbs
+    {translate}
     root={`${operation.model}.${operation.method}`}
     path={queryState.path}
     onNavigate={onbreadcrumbclick}
@@ -716,20 +728,23 @@
         variant="ghost"
         size="sm"
         class="h-7 px-2"
-        aria-label="Previous array item"
+        aria-label={translate("previousItem")}
         disabled={arrayBarContext.currentIndex === 0}
         onclick={() => navigateToArrayItem(arrayBarContext.currentIndex - 1)}
       >
         ←
       </Button>
       <span class="text-muted-foreground text-xs">
-        Item {arrayBarContext.currentIndex + 1} of {arrayBarContext.totalItems}
+        {translate("itemOf", {
+          index: arrayBarContext.currentIndex + 1,
+          count: arrayBarContext.totalItems,
+        })}
       </span>
       <Button
         variant="ghost"
         size="sm"
         class="h-7 px-2"
-        aria-label="Next array item"
+        aria-label={translate("nextItem")}
         disabled={arrayBarContext.currentIndex >=
           arrayBarContext.totalItems - 1}
         onclick={() => navigateToArrayItem(arrayBarContext.currentIndex + 1)}
@@ -741,7 +756,7 @@
         size="sm"
         class="h-7 px-2"
         disabled={readOnly}
-        aria-label="Add array item"
+        aria-label={translate("addItem")}
         onclick={handleAddArrayItemInline}
       >
         +
@@ -752,7 +767,7 @@
           size="sm"
           class="h-7 px-2"
           disabled={readOnly}
-          aria-label="Remove array item"
+          aria-label={translate("removeItem")}
           onclick={handleRemoveCurrentItem}
         >
           −
@@ -767,7 +782,7 @@
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
         >
-          Items ({currentArrayValue.length})
+          {translate("items", { count: currentArrayValue.length })}
         </div>
         <div class="space-y-2">
           {#each currentArrayValue as item, i}
@@ -782,10 +797,11 @@
               tabindex={0}
             >
               <div class="flex items-center justify-between">
-                <span class="font-medium">Item {i + 1}</span>
+                <span class="font-medium"
+                  >{translate("item", { index: i + 1 })}</span
+                >
                 <span class="text-xs text-muted-foreground font-mono">
-                  {fieldCount}
-                  {fieldCount === 1 ? "field" : "fields"}
+                  {translate("fieldCount", { count: fieldCount })}
                 </span>
               </div>
             </Card>
@@ -797,7 +813,7 @@
           disabled={readOnly}
           onclick={handleAddArrayItemFromOverview}
         >
-          + Add Item
+          + {translate("addItem")}
         </Button>
       </div>
     {:else if currentEnumOptions}
@@ -805,7 +821,7 @@
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
         >
-          Enum Values
+          {translate("enumValues")}
         </div>
         <div class="space-y-2">
           {#each currentEnumOptions as option}
@@ -834,11 +850,11 @@
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
         >
-          Fields
+          {translate("fields")}
         </div>
 
         {#if currentFields.length === 0}
-          <p class="text-sm text-muted-foreground">No fields available</p>
+          <p class="text-sm text-muted-foreground">{translate("noFields")}</p>
         {:else}
           <div class="space-y-2">
             {#each currentFields as field}
@@ -853,15 +869,25 @@
 
               <Card
                 class={`relative p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
-                >
+              >
                 <div class="flex items-center justify-between gap-2">
-                  <button type="button"
+                  <button
+                    type="button"
                     class="min-h-11 sm:min-h-0 text-left flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5 outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
-
                     disabled={readOnly && !isExpandable}
-                    aria-label={`${isExpandable ? "Open" : isActive ? "Remove" : "Add"} ${field.name}`}
-                    onclick={() => handleFieldClick(field)}>
-                    <span class="font-medium min-w-0 break-words">{field.name}</span>
+                    aria-label={translate(
+                      isExpandable
+                        ? "openNamed"
+                        : isActive
+                          ? "removeNamed"
+                          : "addNamed",
+                      { name: field.name },
+                    )}
+                    onclick={() => handleFieldClick(field)}
+                  >
+                    <span class="font-medium min-w-0 break-words"
+                      >{field.name}</span
+                    >
                     <span
                       class="text-xs font-mono truncate max-w-[120px] @xs:max-w-[160px] @sm:max-w-[200px] @md:max-w-none {field.isRelation &&
                       !isEnum
@@ -898,7 +924,7 @@
                     {#if !isExpandable && !isListTyped && field.objectTypeName}
                       <span
                         class="text-[10px] text-muted-foreground italic shrink-0"
-                        >(no fields)</span
+                        >{translate("emptyFields")}</span
                       >
                     {/if}
                   </button>
@@ -909,7 +935,10 @@
                       size="icon"
                       class="relative z-10 h-8 w-8 shrink-0 max-sm:min-h-11 max-sm:min-w-11"
                       disabled={readOnly}
-                      aria-label={`${isActive ? "Remove" : "Add"} ${field.name}`}
+                      aria-label={translate(
+                        isActive ? "removeNamed" : "addNamed",
+                        { name: field.name },
+                      )}
                       onclick={(e) => handleFieldButtonClick(field, e)}
                     >
                       {isActive ? "−" : "+"}
@@ -926,7 +955,7 @@
         <div
           class="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
         >
-          Arguments
+          {translate("arguments")}
         </div>
         <div class="space-y-2">
           {#each availableArgs as arg}
@@ -941,15 +970,24 @@
 
             <Card
               class={`relative p-3 cursor-pointer transition-colors ${isActive ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
->
+            >
               <div class="flex items-center justify-between gap-2">
-                <button type="button"
+                <button
+                  type="button"
                   class="min-h-11 sm:min-h-0 text-left flex-1 min-w-0 flex flex-wrap @xs:flex-nowrap items-baseline gap-x-2 gap-y-0.5 outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
-
-                    disabled={readOnly && !isExpandable}
-                    aria-label={`${isExpandable ? "Open" : isActive ? "Remove" : "Add"} ${arg.name}`}
-                    onclick={() => handleArgClick(arg)}>
-                  <span class="font-medium min-w-0 break-words">{arg.name}</span>
+                  disabled={readOnly && !isExpandable}
+                  aria-label={translate(
+                    isExpandable
+                      ? "openNamed"
+                      : isActive
+                        ? "removeNamed"
+                        : "addNamed",
+                    { name: arg.name },
+                  )}
+                  onclick={() => handleArgClick(arg)}
+                >
+                  <span class="font-medium min-w-0 break-words">{arg.name}</span
+                  >
                   <span
                     class="text-xs text-muted-foreground font-mono truncate max-w-[120px] @xs:max-w-[160px] @sm:max-w-[200px] @md:max-w-none"
                     title={arg.type}
@@ -974,7 +1012,7 @@
                   {#if !isExpandable && !isListTyped && arg.objectTypeName}
                     <span
                       class="text-[10px] text-muted-foreground italic shrink-0"
-                      >(no fields)</span
+                      >{translate("emptyFields")}</span
                     >
                   {/if}
                 </button>
@@ -984,7 +1022,10 @@
                     size="icon"
                     class="relative z-10 h-8 w-8 shrink-0 max-sm:min-h-11 max-sm:min-w-11"
                     disabled={readOnly}
-                    aria-label={`${isActive ? "Remove" : "Add"} ${arg.name}`}
+                    aria-label={translate(
+                      isActive ? "removeNamed" : "addNamed",
+                      { name: arg.name },
+                    )}
                     onclick={(e) => handleArgButtonClick(arg, e)}
                   >
                     {isActive ? "−" : "+"}
