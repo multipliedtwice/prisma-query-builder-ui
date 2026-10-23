@@ -16,7 +16,7 @@ export async function showBuilder(page) {
   if (await button.isVisible()) await button.click();
 }
 export async function action(page, name) {
-  await page.getByLabel('Query actions', { exact: true }).click();
+  await page.getByLabel('Actions', { exact: true }).click();
   await page.locator('.query-more-actions').getByRole('button', { name, exact: true }).click();
 }
 export async function noOverflow(page) {
@@ -74,7 +74,7 @@ export const workspaceCases = [
     await action(page, 'Delete'); await expect(page.getByRole('dialog')).toContainText('Delete query?');
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(page.locator('.query-active-identity')).toContainText('assignment-autocomplete-copy');
     await action(page, 'Delete'); await page.getByRole('dialog').getByRole('button', { name: 'Delete query', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByLabel('Query actions', { exact: true })).toBeFocused();
+    await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByLabel('Actions', { exact: true })).toBeFocused();
     expect(await page.evaluate(({ key, id }) => JSON.parse(localStorage.getItem(key)).queries.some(query => query.id === id), { key: storageKey, id: copy.id })).toBe(false);
   } },
   { name: 'two registered application routes visibly share one template', async run(page) {
@@ -85,7 +85,7 @@ export const workspaceCases = [
   } },
   { name: 'linked query cannot be deleted until its routes are explicitly unlinked', async run(page) {
     await action(page, 'Delete'); const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('Unlink this query'); await expect(dialog.getByRole('button', { name: 'Delete query', exact: true })).toBeDisabled();
+    await expect(dialog).toContainText('Unlink application usages before deleting this query.'); await expect(dialog.getByRole('button', { name: 'Delete query', exact: true })).toBeDisabled();
   } },
   { name: 'save failure retains edits and offers a real retry', async run(page) {
     await page.getByRole('button', { name: 'Open select', exact: true }).click(); await page.getByRole('button', { name: 'Add email', exact: true }).click();
@@ -124,7 +124,7 @@ export const workspaceCases = [
     await expect(page.getByRole('button', { name: 'Add email', exact: true })).toBeVisible();
   } },
   { name: 'query actions menu dismisses and dialogs return focus', async run(page) {
-    const summary = page.getByLabel('Query actions', { exact: true }); const menu = page.locator('.query-more-actions');
+    const summary = page.getByLabel('Actions', { exact: true }); const menu = page.locator('.query-more-actions');
     await summary.click(); await expect(menu).toHaveAttribute('open', ''); await page.keyboard.press('Escape');
     await expect(menu).not.toHaveAttribute('open', ''); await expect(summary).toBeFocused();
     await summary.click(); await page.locator('.query-workspace-header').click({ position: { x: 4, y: 4 } }); await expect(menu).not.toHaveAttribute('open', '');
@@ -140,7 +140,7 @@ export const workspaceCases = [
     await dialog.getByRole('button', { name: 'Create query', exact: true }).click(); await expect(dialog.getByRole('alert')).toHaveText('Enter a query name.');
     await dialog.getByLabel('Name', { exact: true }).fill('Second account');
     await dialog.getByRole('button', { name: 'Create query', exact: true }).click();
-    await expect(dialog.getByRole('alert')).toHaveText('Another findUnique query already uses the usage key “account”.');
+    await expect(dialog.getByRole('alert')).toHaveText('Another findUnique query already uses “account”.');
   } },
   { name: 'saving keeps keyboard focus on the save control', async run(page) {
     await page.getByRole('button', { name: 'Open select', exact: true }).click(); await page.getByRole('button', { name: 'Add email', exact: true }).click();
@@ -149,8 +149,8 @@ export const workspaceCases = [
   } },
   { name: 'narrow code view has no duplicate heading and keeps its tools in the toggle row', async run(page) {
     const toggle = page.getByRole('button', { name: 'Prisma query', exact: true });
-    if (!(await toggle.isVisible())) { await expect(page.getByRole('heading', { name: 'Prisma Query', exact: true })).toBeVisible(); return; }
-    await toggle.click(); await expect(page.getByRole('heading', { name: 'Prisma Query', exact: true })).toBeHidden();
+    if (!(await toggle.isVisible())) { await expect(page.getByRole('heading', { name: 'Prisma query', exact: true })).toBeVisible(); return; }
+    await toggle.click(); await expect(page.getByRole('heading', { name: 'Prisma query', exact: true })).toBeHidden();
     const row = await page.locator('.query-mobile-panes').boundingBox(); const format = await page.getByRole('button', { name: 'Format', exact: true }).boundingBox();
     const last = await toggle.boundingBox(); expect(format.y).toBeGreaterThanOrEqual(row.y - 1); expect(format.y + format.height).toBeLessThanOrEqual(row.y + row.height + 1);
     expect(format.x).toBeGreaterThanOrEqual(last.x + last.width); await noOverflow(page);

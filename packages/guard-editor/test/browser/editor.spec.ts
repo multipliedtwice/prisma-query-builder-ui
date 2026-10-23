@@ -11,7 +11,7 @@ test('read-only mode permits tree navigation but not changes or saving', async (
   await page.getByRole('button', { name: 'Open select', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add email', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Save query', exact: true })).toBeDisabled();
-  await expect(page.getByText('Read-only access. Queries can be inspected but not changed.')).toBeVisible(); await expect(page.getByLabel('Query actions', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Read-only access. Queries can be inspected but not changed.')).toBeVisible(); await expect(page.getByLabel('Actions', { exact: true })).toHaveCount(0);
 });
 test('saving pins a snapshot and leaves later edits dirty after acknowledgment', async ({ page }) => {
   await page.goto('/?pending-save'); await page.getByRole('button', { name: 'Open select', exact: true }).click();

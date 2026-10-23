@@ -16,7 +16,7 @@ export function fixtureCases() {
   test('invalid query names the argument at fault', async ({ page }) => {
     const queries = structuredClone(exampleQueries); queries[0].payload.take = 500; queries[0].operation = 'findMany'; queries[0].payload = { select: { id: true }, take: 500 };
     await seed(page, queries, { version: 1, schema: templateContext.identity, bindings: [] }); await page.goto('/');
-    await expect(page.locator('.query-state')).toHaveText('invalid'); await expect(page.locator('.query-issue')).toHaveText(/^take: /);
+    await expect(page.locator('.query-state')).toHaveAttribute('data-state', 'invalid'); await expect(page.locator('.query-state')).toHaveText('Invalid'); await expect(page.locator('.query-issue')).toHaveText(/^take: /);
   });
   test('long names and many variants fit without page overflow', async ({ page }) => {
     const variants = Array.from({ length: 40 }, (_, index) => ({ ...structuredClone(exampleQueries[0]), id: `long-${index}`, usageKey: `application-usage-with-a-long-name-${index}`, name: `Long application query with detailed usage name ${index} `.repeat(5), accepted: false }));
