@@ -40,6 +40,10 @@ for (const source of ['@import "./external.css";', 'div{background:url(https://e
   test('CSS cannot add a resource-loading side effect', () => assert.ok(inspectModule(source, 'styles.css').failures.length));
 }
 
+test('Svelte CSS globals are not runtime globals', () => {
+  assert.deepEqual(inspectModule('<style>:global(.editor) { color: inherit; }</style><p>Editor</p>', 'candidate.svelte').failures, []);
+});
+
 test('scanner includes type-only imports and barrel re-exports', () => {
   assert.deepEqual(inspectModule('import type { X } from "./a.js"; export { y } from "./b.js";', 'index.ts').imports, ['./a.js', './b.js']);
 });

@@ -29,10 +29,11 @@ export function inspectModule(source, filename, { ui = false } = {}) {
   const svelte = filename.endsWith('.svelte');
   const scripts = svelte ? [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/g)].map(match => match[1]) : [source];
   if (svelte) {
+    const runtimeSource = source.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/g, '');
     if (/\{@html\b|<svelte:(?:window|document|body)\b|<(?:iframe|img|audio|video|object|embed|link)\b|\b(?:src|action|formaction|srcdoc)\s*=/i.test(source)) failures.push(message(filename, 'Unsafe or resource-loading markup'));
     if (/\bhref\s*=/.test(source) && !(ui && /\/button\/button\.svelte$/.test(filename))) failures.push(message(filename, 'Resource navigation is not part of the controlled editor'));
     for (const identifier of [...forbiddenIdentifiers, ...(ui ? [] : domIdentifiers)]) {
-      if (new RegExp(`(?<![A-Za-z-])${identifier}(?![A-Za-z-])`).test(source)) failures.push(message(filename, `Forbidden API token: ${identifier}`));
+      if (new RegExp(`(?<![A-Za-z-])${identifier}(?![A-Za-z-])`).test(runtimeSource)) failures.push(message(filename, `Forbidden API token: ${identifier}`));
     }
   }
   for (const [index, script] of scripts.entries()) {
