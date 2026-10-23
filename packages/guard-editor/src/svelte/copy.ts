@@ -321,7 +321,10 @@ export function queryErrorText(
       typeof issue.code === "string" &&
       typeof issue.message === "string"
     )
-      return queryIssueText(issue, translate);
+      return queryIssueText(
+        { path: issue.path, code: issue.code, message: issue.message },
+        translate,
+      );
   }
   return error instanceof Error ? error.message : translate("operationFailed");
 }
