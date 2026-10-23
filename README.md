@@ -21,7 +21,7 @@ Visual query builder for Prisma Client - Developer tool for building and testing
 - 🔍 **Query validation** - Validate queries before execution
 - 🌓 **Theme support** - Dark and light modes
 - 🔌 **Embedded mode** - Integrate with your API server and documentation
-- ⚡ **prisma-sql support** - Optional 2-7x query performance boost (both modes)
+- ⚡ **prisma-sql support** - Optional faster execution for supported read queries; measure it against your own data. [Benchmark methodology](https://multipliedtwice.github.io/prisma-sql/#benchmarks)
 
 ## Installation
 
@@ -568,7 +568,7 @@ Queries are stored in a local SQLite database (`queries.db`) and survive applica
 
 ## Query Execution with prisma-sql
 
-Both standalone mode (with workspaces) and embedded mode support `prisma-sql` for 2-7x performance improvement:
+Both standalone mode (with workspaces) and embedded mode support `prisma-sql` for supported read queries. Performance depends on query shape, data size, indexes, and database; review the [benchmark methodology](https://multipliedtwice.github.io/prisma-sql/#benchmarks) and measure against your own data:
 
 **Standalone Mode (with workspaces):**
 1. Toggle the "prisma-sql" switch in the code preview panel
